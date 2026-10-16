@@ -724,8 +724,9 @@ open_task_folder_on_completion = true
 # =============================================================================
 # Request YouTube Shorts from Slack with /short, an @mention, or (for allowed
 # agent bots such as Mila) a "short: <topic>" message. See docs/slack-mila.md.
-# Every key can also be set as an environment variable named SLACK_<KEY>,
-# e.g. SLACK_BOT_TOKEN. Keep real tokens out of version control.
+# Every key except font_name, video_source and script_prompt can also be set
+# as an environment variable named SLACK_<KEY>, e.g. SLACK_BOT_TOKEN, which
+# takes precedence. Keep real tokens out of version control.
 
 [slack]
 # bot_token = "xoxb-..."
@@ -738,7 +739,9 @@ open_task_folder_on_completion = true
 # default_language = "tr"         # "tr", "en", or "de"
 # timezone = "Europe/Istanbul"
 # posting_slots = ["12:30", "19:00", "21:00"]
-# max_parallel_jobs = 2
+# max_parallel_jobs = 2           # 1-8 renders at once
+# poll_interval_seconds = 5       # How often task progress is checked
+# job_timeout_seconds = 1800      # Give up on a render after this long
 # font_name = "BeVietnamPro-Bold.ttf"
 # video_source = ""               # Overrides [app].video_source for Slack jobs
 # script_prompt = ""              # Overrides the built-in ECHO brand prompt

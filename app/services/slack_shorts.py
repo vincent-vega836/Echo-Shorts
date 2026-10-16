@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Iterable
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo
 
 import requests
@@ -34,7 +34,10 @@ import requests
 TASK_STATE_FAILED = -1
 TASK_STATE_COMPLETE = 1
 
-TRIGGER_PATTERN = re.compile(r"^\s*(?:/short|short|shorts)\s*[:\-]?\s*", re.IGNORECASE)
+# "short:" / "shorts:" (agent messages) or a literal "/short" word. The colon or
+# word boundary is required so subjects such as "Shortcut tips" stay intact.
+TRIGGER_PATTERN = re.compile(r"^\s*(?:/short\b|shorts?\s*:)\s*", re.IGNORECASE)
+AGENT_TRIGGER_PATTERN = re.compile(r"^\s*shorts?\s*:", re.IGNORECASE)
 MENTION_PATTERN = re.compile(r"<@[A-Z0-9]+(?:\|[^>]*)?>")
 OPTION_PATTERN = re.compile(
     r"(?<!\S)(dil|lang|ses|voice|adet|count|format|aspect|kaynak|source)\s*:\s*(\S+)",
@@ -43,6 +46,8 @@ OPTION_PATTERN = re.compile(
 
 MAX_SUBJECT_LENGTH = 200
 MAX_SCRIPT_LENGTH = 5000
+# Slack rejects uploads above 1 GB; stop downloading before that.
+MAX_VIDEO_BYTES = 1024 * 1024 * 1024
 
 # Edge TTS voices per language. Each brand language gets one female and one
 # male voice so requests can say "ses: erkek" without knowing voice IDs.
@@ -203,7 +208,7 @@ def next_posting_slots(
     """Return the next ``count`` posting times at or after ``now + min_lead``."""
     tz = ZoneInfo(timezone)
     local_now = now.astimezone(tz)
-    parsed = sorted(_parse_slot(slot) for slot in slots)
+    parsed = sorted(parse_slot(slot) for slot in slots)
     if not parsed:
         return []
     earliest = local_now + min_lead
@@ -220,7 +225,7 @@ def next_posting_slots(
     return result
 
 
-def _parse_slot(slot: str) -> tuple[int, int]:
+def parse_slot(slot: str) -> tuple[int, int]:
     hour, _, minute = str(slot).partition(":")
     h, m = int(hour), int(minute or 0)
     if not (0 <= h < 24 and 0 <= m < 60):
@@ -268,6 +273,12 @@ class MptClient:
         if api_key:
             self.session.headers["x-api-key"] = api_key
 
+    def ping(self) -> bool:
+        try:
+            return self.session.get(f"{self.base_url}/ping", timeout=self.timeout).status_code == 200
+        except requests.RequestException:
+            return False
+
     def create_video(self, payload: dict) -> str:
         response = self.session.post(
             f"{self.base_url}/api/v1/videos", json=payload, timeout=self.timeout
@@ -311,19 +322,23 @@ class MptClient:
                 raise MptApiError(f"Zaman aşımı: görev {task_id} {int(timeout)} sn içinde bitmedi")
             sleep(poll_interval)
 
-    def download(self, uri: str, destination: str) -> str:
+    def download(self, uri: str, destination: str, max_bytes: int = MAX_VIDEO_BYTES) -> str:
         # The API builds artifact links from its public `endpoint` setting, which
         # may differ from the address the bot reaches it on. Only the /tasks/
         # path is reused, so the API key is never sent to another host.
         path = urlparse(uri).path
-        if not path.startswith("/tasks/") or ".." in path.split("/"):
+        if not path.startswith("/tasks/") or ".." in unquote(path).split("/"):
             raise MptApiError(f"Beklenmeyen video adresi: {uri}")
         url = f"{self.base_url}{path}"
+        written = 0
         with self.session.get(url, stream=True, timeout=self.timeout) as response:
             if response.status_code != 200:
                 raise MptApiError(f"Video indirilemedi: HTTP {response.status_code}")
             with open(destination, "wb") as f:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise MptApiError("Video Slack yükleme sınırını aşıyor")
                     f.write(chunk)
         return destination
 

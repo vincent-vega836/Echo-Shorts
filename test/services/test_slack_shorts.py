@@ -37,6 +37,12 @@ class ParseRequestTests(unittest.TestCase):
                          ("tr", 1, "9:16", "female"))
         self.assertEqual(len(request.warnings), 4)
 
+    def test_subject_starting_with_short_is_not_truncated(self):
+        self.assertEqual(ss.parse_request("Shortcut ipuçları").subject, "Shortcut ipuçları")
+        self.assertEqual(ss.parse_request("/short Shorts trendleri").subject, "Shorts trendleri")
+        self.assertIsNone(ss.AGENT_TRIGGER_PATTERN.match("Shortcut ipuçları"))
+        self.assertIsNotNone(ss.AGENT_TRIGGER_PATTERN.match("Shorts : konu"))
+
     def test_count_is_clamped_to_api_limit(self):
         self.assertEqual(ss.parse_request("Konu adet:50").count, 5)
 
@@ -152,10 +158,23 @@ class MptClientTests(unittest.TestCase):
         self.assertEqual(self.session.get.call_args.args[0], "http://api:8080/tasks/t1/final-1.mp4")
 
     def test_download_rejects_paths_outside_tasks(self):
-        for uri in ("https://evil.example/api/v1/x", "/tasks/../config.toml"):
+        for uri in ("https://evil.example/api/v1/x", "/tasks/../config.toml",
+                    "/tasks/%2e%2e/config.toml"):
             with self.assertRaises(ss.MptApiError):
                 self.client.download(uri, "unused")
         self.session.get.assert_not_called()
+
+    def test_download_stops_above_size_limit(self):
+        self.session.get.return_value = _response(chunks=[b"12345", b"67890"])
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ss.MptApiError, "sınır"):
+                self.client.download("/tasks/t1/a.mp4", os.path.join(tmp, "a.mp4"), max_bytes=8)
+
+    def test_ping(self):
+        self.session.get.return_value = _response(200)
+        self.assertTrue(self.client.ping())
+        self.session.get.side_effect = ss.requests.ConnectionError()
+        self.assertFalse(self.client.ping())
 
 
 if __name__ == "__main__":

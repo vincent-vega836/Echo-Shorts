@@ -26,8 +26,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        INSTALL_SLACK: "1"
     container_name: "moneyprinterturbo-slack"
-    command: [ "sh", "-c", "pip install --quiet 'slack-bolt>=1.21.0' && python3 slack_bot.py" ]
+    command: [ "python3", "slack_bot.py" ]
     environment:
       - SLACK_MPT_API_URL=http://api:8080
       - SLACK_BOT_TOKEN

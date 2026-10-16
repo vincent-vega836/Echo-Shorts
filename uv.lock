@@ -1558,7 +1558,7 @@ requires-dist = [
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "redis", specifier = "==5.2.0" },
     { name = "requests", specifier = "==2.33.1" },
-    { name = "slack-bolt", marker = "extra == 'slack'", specifier = ">=1.21.0" },
+    { name = "slack-bolt", marker = "extra == 'slack'", specifier = "==1.30.0" },
     { name = "socksio", specifier = "==1.0.0" },
     { name = "streamlit", specifier = "==1.59.1" },
     { name = "streamlit-tour", specifier = "==1.1.0" },

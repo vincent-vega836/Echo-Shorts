@@ -587,3 +587,7 @@ Click to view the [`LICENSE`](LICENSE) file
 ### Editable local video projects
 
 Use [revision-aware local projects](docs/video-projects.md) to replace prepared scene media, compare revisions and rebuild only affected stages. The opt-in CLI preserves verified artifacts and the last successful export; it makes no provider calls or automatic posts.
+
+### Request Shorts from Slack
+
+[`slack_bot.py`](docs/slack-mila.md) lets a team or an allowlisted agent request a 9:16 Short with `/short <topic>`, an @mention, or a `short: <topic>` message. The finished video, draft YouTube metadata and suggested posting slots are posted to the thread for human approval; the bot never publishes on its own.

@@ -46,7 +46,7 @@ twelvelabs = [
 # Optional Slack bot (slack_bot.py) for requesting Shorts from Slack, e.g. by
 # the Mila agent in #brand-social. Install with `uv sync --extra slack`.
 slack = [
-    "slack-bolt>=1.21.0",
+    "slack-bolt==1.30.0",
 ]
 
 [dependency-groups]

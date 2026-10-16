@@ -91,6 +91,13 @@ RUN if [ "$PIP_USE_OFFICIAL" = "1" ]; then \
         pip install --no-cache-dir --retries 3 --timeout 60 -r requirements.txt; \
     fi
 
+# Optional Slack bot dependency (docker compose --profile slack). Keep the
+# version in sync with the "slack" extra in pyproject.toml.
+ARG INSTALL_SLACK=0
+RUN if [ "$INSTALL_SLACK" = "1" ]; then \
+        pip install --no-cache-dir --retries 3 --timeout 60 "slack-bolt==1.30.0"; \
+    fi
+
 # Now copy the rest of the codebase into the image
 COPY . .
 

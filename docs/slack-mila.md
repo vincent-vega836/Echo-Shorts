@@ -111,13 +111,24 @@ Altyazı fontu Türkçe/Almanca karakterleri tam destekleyen `BeVietnamPro-Bold.
    SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... uv run python slack_bot.py
    ```
 
-   Docker ile: `SLACK_BOT_TOKEN=... SLACK_APP_TOKEN=... docker compose --profile slack up -d`
+   Docker ile (`slack-bolt` imaja derleme sırasında kurulur):
+
+   ```bash
+   SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... docker compose --profile slack up -d --build
+   ```
 
 ## Notlar
 
 - `[app].api_key` ayarlıysa bot aynı anahtarı `x-api-key` başlığıyla gönderir;
   video indirme yalnızca `/tasks/` yolunu ve yapılandırılmış API adresini kullanır.
-- "Yeniden üret" düğmesi istekleri bellekte tutar; bot yeniden başlarsa eski
-  mesajlarda isteği tekrar göndermek gerekir.
+- Mila'nın mesajı hem `short:` ile başlayıp hem botu mention etse bile tek
+  video üretilir; iki kişi aynı anda düğmeye bassa da tek karar işlenir.
+- "Yeniden üret" düğmesi son 200 isteği bellekte tutar; bot yeniden başlarsa
+  eski mesajlarda isteği tekrar göndermek gerekir.
+- Ayar hataları (geçersiz dil, saat dilimi, paylaşım saati) bot açılırken
+  anahtar adıyla raporlanır. Beklenmeyen hatalar Slack'e değil loglara yazılır.
+- Kod: `app/services/slack_shorts.py` (ayrıştırma, preset, API istemcisi),
+  `app/services/slack_shorts_bot.py` (Slack davranışı, Slack SDK'sız test
+  edilir), `slack_bot.py` (yalnızca başlatıcı).
 - Slack dosya yükleme sınırları geçerlidir; Shorts (≤60 sn, 1080p) bu sınırın
   çok altındadır.
