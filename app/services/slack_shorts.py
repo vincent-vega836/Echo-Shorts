@@ -152,9 +152,10 @@ PROFILES = {
         clip_duration=2,
         bgm_volume=0.12,
         hashtags=("shorts", "facts", "mystery"),
-        # Deep, authoritative narrator; free and returns word timings, so
-        # word-by-word subtitles stay in sync without Whisper.
-        voice="en-US-ChristopherNeural-Male",
+        # Warm, natural storyteller (chosen by ear over ChristopherNeural);
+        # free and returns word timings, so word-by-word subtitles stay in
+        # sync without Whisper.
+        voice="en-US-AndrewMultilingualNeural-Male",
     ),
 }
 

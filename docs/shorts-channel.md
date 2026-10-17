@@ -17,7 +17,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 8 | Yapı | Video başına tek, derin gerçek |
 | 9 | Altyazı | Kelime kelime vurgulu |
 | 10 | Görüntü | Pixabay (Pexels yeni anahtar vermiyor); Coverr eklenirse dönüşümlü |
-| 11 | Ses | Ücretsiz Edge sesi `en-US-ChristopherNeural` (derin erkek anlatıcı); ElevenLabs istenmedi |
+| 11 | Ses | Ücretsiz Edge sesi `en-US-AndrewMultilingualNeural` (sıcak, doğal anlatıcı; dinleyerek seçildi); ElevenLabs istenmedi |
 | 12 | Müzik | Kısık gerilim/ambient |
 | 13 | Saat | Her gün 12:30 New York (= 19:30 İstanbul) |
 | 14 | Platform | YouTube + TikTok |

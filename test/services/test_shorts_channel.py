@@ -41,7 +41,7 @@ class FactsProfileTests(unittest.TestCase):
     def test_facts_profile_uses_free_deep_narrator_without_elevenlabs(self):
         settings = load_settings({"profile": "facts"}, {})
         payload = ss.build_video_payload(settings.parse("Your brain glows"), dict(settings.preset))
-        self.assertEqual(payload["voice_name"], "en-US-ChristopherNeural-Male")
+        self.assertEqual(payload["voice_name"], "en-US-AndrewMultilingualNeural-Male")
         female = ss.build_video_payload(settings.parse("Fact ses:kadın"), dict(settings.preset))
         self.assertEqual(female["voice_name"], "en-US-AvaNeural-Female")
         self.assertEqual(shorts_cli.subtitle_sync_warning(settings, "edge"), "")
