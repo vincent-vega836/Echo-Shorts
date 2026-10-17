@@ -1,5 +1,54 @@
 # Slack'ten YouTube Shorts üretimi (Mila entegrasyonu)
 
+İki kullanım yolu var:
+
+- **A. Doğrudan Mila (önerilen, ek Slack uygulaması gerekmez):** Mila
+  `shorts_cli.py` aracını çalıştırır, videoyu ve YouTube taslağını alır, kendi
+  Slack kimliğiyle thread'e yükler.
+- **B. Ayrı "Echo Shorts" botu:** `/short` komutu ve düğmeli onay kartı için
+  workspace'te yeni bir Slack uygulaması gerekir (aşağıda "Ayrı bot" bölümü).
+
+## A. Doğrudan Mila
+
+Mila'nın çalıştığı makinede MPT API açık olmalı (`uv run python main.py`).
+Mila, isteği Slack'teki biçimle aynen verir:
+
+```bash
+uv run python shorts_cli.py --out ./shorts "short: Sakin yazılım planlaması dil:tr"
+# çok satırlı istek / hazır senaryo için stdin:
+printf 'short: Sakin planlama\nses: erkek\n---\nHazır senaryo metni.' | uv run python shorts_cli.py --out ./shorts
+```
+
+Çıktı tek bir JSON'dur (ilerleme stderr'e yazılır):
+
+```json
+{
+  "task_id": "…", "subject": "Sakin yazılım planlaması", "language": "tr",
+  "videos": ["/…/shorts/short-…-1.mp4"],
+  "script": "…", "title": "Sakin yazılım planlaması #Shorts",
+  "description": "…\n\nmadebyecho.xyz", "tags": ["shorts", "echo", "…"],
+  "posting_slots": [{"at": "2026-10-17T19:00:00+03:00", "label": "Cmt 17.10 19:00"}],
+  "warnings": []
+}
+```
+
+Çıkış kodları: `0` hazır, `2` geçersiz istek/ayar, `1` üretim hatası
+(her durumda stdout'ta `{"error": "…"}` ya da sonuç JSON'u bulunur).
+API adresi, anahtar, saat dilimi, paylaşım saatleri ve preset `[slack]`
+bölümünden okunur; Slack token'ı gerekmez.
+
+**Mila'nın talimatına eklenecek metin:**
+
+> Doğukan Bey veya ekip bir YouTube Short istediğinde `shorts_cli.py`
+> aracını isteği olduğu gibi vererek çalıştır. Senaryoyu sen yazdıysan
+> `---` satırından sonra ekle. Çıkan `videos` dosyalarını thread'e yükle;
+> `title`, `tags` ve `posting_slots` bilgisini ayrı mesajda, `description`
+> metnini caption olarak ayrı bir mesajda ver. Asla yayınlama; yayın için
+> onay ve saat iste. `error` dönerse hatayı kısaca bildir, otomatik tekrar
+> deneme.
+
+## B. Ayrı bot
+
 `slack_bot.py`, Slack'teki istekleri MoneyPrinterTurbo API'sine iletir, üretilen
 dikey videoyu aynı thread'e yükler ve bir insanın onayına sunar.
 
