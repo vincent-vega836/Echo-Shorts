@@ -122,6 +122,8 @@ class Profile:
     bgm_volume: float = 0.15
     signature: str = ""
     hashtags: tuple[str, ...] = ()
+    # Free Edge voice for the profile's own language and gender; empty uses VOICES.
+    voice: str = ""
 
 
 PROFILES = {
@@ -150,6 +152,9 @@ PROFILES = {
         clip_duration=2,
         bgm_volume=0.12,
         hashtags=("shorts", "facts", "mystery"),
+        # Deep, authoritative narrator; free and returns word timings, so
+        # word-by-word subtitles stay in sync without Whisper.
+        voice="en-US-ChristopherNeural-Male",
     ),
 }
 
@@ -257,15 +262,14 @@ def build_video_payload(request: ShortRequest, settings: dict | None = None) -> 
     profile = get_profile(settings.get("profile"))
     voices = VOICES.get(request.language, VOICES["tr"])
     voice = voices[request.gender]
+    own_voice = request.language == profile.language and request.gender == profile.gender
+    if own_voice and profile.voice:
+        voice = profile.voice
     # A configured ElevenLabs voice ("elevenlabs:<id>:<name>") replaces the
     # free Edge voice for the profile's own language and gender only, so a
     # one-off "dil:tr" request does not get an English narrator.
     elevenlabs_voice = settings.get("elevenlabs_voice", "")
-    if (
-        elevenlabs_voice
-        and request.language == profile.language
-        and request.gender == profile.gender
-    ):
+    if elevenlabs_voice and own_voice:
         voice = elevenlabs_voice
     payload: dict[str, Any] = {
         "video_subject": request.subject,

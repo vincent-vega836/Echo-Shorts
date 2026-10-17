@@ -38,6 +38,14 @@ class FactsProfileTests(unittest.TestCase):
         self.assertEqual(payload["video_script_prompt"], ss.FACTS_SCRIPT_PROMPT)
         TaskVideoRequest(**payload)
 
+    def test_facts_profile_uses_free_deep_narrator_without_elevenlabs(self):
+        settings = load_settings({"profile": "facts"}, {})
+        payload = ss.build_video_payload(settings.parse("Your brain glows"), dict(settings.preset))
+        self.assertEqual(payload["voice_name"], "en-US-ChristopherNeural-Male")
+        female = ss.build_video_payload(settings.parse("Fact ses:kadın"), dict(settings.preset))
+        self.assertEqual(female["voice_name"], "en-US-AvaNeural-Female")
+        self.assertEqual(shorts_cli.subtitle_sync_warning(settings, "edge"), "")
+
     def test_elevenlabs_voice_only_replaces_profile_language(self):
         settings = load_settings(FACTS, {})
         payload = ss.build_video_payload(settings.parse("Konu dil:tr"), dict(settings.preset))

@@ -16,8 +16,8 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 7 | Kanca | Şok edici ama doğru iddia (ilk 2 sn) |
 | 8 | Yapı | Video başına tek, derin gerçek |
 | 9 | Altyazı | Kelime kelime vurgulu |
-| 10 | Görüntü | Pexels + Pixabay dönüşümlü |
-| 11 | Ses | ElevenLabs, derin erkek anlatıcı |
+| 10 | Görüntü | Pixabay (Pexels yeni anahtar vermiyor); Coverr eklenirse dönüşümlü |
+| 11 | Ses | Ücretsiz Edge sesi `en-US-ChristopherNeural` (derin erkek anlatıcı); ElevenLabs istenmedi |
 | 12 | Müzik | Kısık gerilim/ambient |
 | 13 | Saat | Her gün 12:30 New York (= 19:30 İstanbul) |
 | 14 | Platform | YouTube + TikTok |
@@ -27,7 +27,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 18 | Konu seçimi | Mila + trend verisi |
 | 19 | Rapor | Haftalık Cuma raporu |
 | 20 | Ek gelir | Aylık uzun video derlemesi |
-| — | Sıklık / bütçe | Günde 1 Short, ayda ≤10 $ |
+| — | Sıklık / bütçe | Günde 1 Short, ayda ~0 $ (senaryo Claude aboneliğiyle) |
 
 ## Haftalık akış
 
@@ -50,32 +50,28 @@ gönderilmez, `needs_check` olur: Upload-Post panelinden kontrol edin.
 
 ```toml
 [app]
-pexels_api_keys = ["..."]
+llm_provider = "claude_code"   # senaryolar Claude aboneliğiyle; API anahtarı gerekmez
+video_source = "pixabay"
 pixabay_api_keys = ["..."]
-# ElevenLabs kelime zamanı vermez; kelime kelime altyazı için Whisper şart.
-subtitle_provider = "whisper"
+# coverr_api_keys = ["..."]    # isteğe bağlı ikinci görüntü kaynağı
+subtitle_provider = "edge"     # Edge sesi kelime zamanı verir; Whisper gerekmez
 upload_post_enabled = true
 upload_post_api_key = "..."
 upload_post_username = "..."
 upload_post_youtube_privacy_status = "public"
 
-[whisper]
-model_size = "small.en"   # İngilizce için hızlı ve yeterli; large-v3 CPU'da çok yavaş
-
-[elevenlabs]
-api_key = "..."
-
 [slack]
 profile = "facts"
-elevenlabs_voice = "elevenlabs:<voice_id>:<isim>"   # derin erkek anlatıcı
-video_sources = ["pexels", "pixabay"]
+video_sources = ["pixabay"]    # Coverr eklenirse ["pixabay", "coverr"]
 publish_platforms = ["youtube", "tiktok"]
 queue_path = "storage/shorts/queue.json"
 ```
 
-ElevenLabs ses kimliğini (voice_id) ElevenLabs Voice Library'den seçin; WebUI'nin
-ses listesi de `elevenlabs:<id>:<isim>` biçiminde gösterir. Upload-Post'ta
-YouTube ve TikTok hesaplarını hesap sahibi bağlar; ajan şifre görmez.
+Daha doğal bir ses istenirse ElevenLabs sonradan eklenebilir:
+`[elevenlabs] api_key`, `[slack] elevenlabs_voice = "elevenlabs:<voice_id>:<isim>"`
+ve bu durumda `subtitle_provider = "whisper"` ile `[whisper] model_size = "small.en"`
+gerekir (ElevenLabs kelime zamanı vermez; araç ayar eksikse uyarır).
+Upload-Post'ta YouTube ve TikTok hesaplarını hesap sahibi bağlar; ajan şifre görmez.
 
 Saatlik yayın işi (macOS, `crontab -e`):
 
@@ -105,9 +101,8 @@ yazılırsa senaryo olduğu gibi kullanılır.
 
 | Kalem | Tahmin |
 | --- | --- |
-| ElevenLabs Starter (30 × ~500 karakter ≈ 15 bin karakter) | ~5 $ |
-| Senaryo LLM'i | <1 $ |
-| Pexels, Pixabay, Whisper (yerel), MoneyPrinterTurbo | 0 $ |
+| Senaryo (Claude aboneliği, `claude_code`) | 0 $ ek maliyet |
+| Ses (Edge TTS), görüntü (Pixabay), MoneyPrinterTurbo | 0 $ |
 | Upload-Post | Ücretsiz katman yetmezse ücretli plan |
 
 ## Gerçekçi beklenti ve riskler
