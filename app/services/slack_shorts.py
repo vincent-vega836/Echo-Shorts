@@ -294,7 +294,10 @@ def build_video_payload(request: ShortRequest, settings: dict | None = None) -> 
         "stroke_width": profile.stroke_width,
         "match_materials_to_script": True,
     }
-    source = request.source or settings.get("video_source", "")
+    # The API falls back to Pexels when no source is sent, so an explicit
+    # configured source (or the first rotated one) must always be passed.
+    rotation = [src for src in settings.get("video_sources", "").split(",") if src]
+    source = request.source or settings.get("video_source", "") or (rotation[0] if rotation else "")
     if source:
         payload["video_source"] = source
     if not request.script:

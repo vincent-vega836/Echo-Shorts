@@ -82,6 +82,15 @@ class FactsProfileTests(unittest.TestCase):
         settings = load_settings({"video_sources": ["Pexels", "pixabay"]}, {})
         self.assertEqual(settings.preset["video_sources"], "pexels,pixabay")
 
+    def test_single_render_uses_configured_source_not_api_default(self):
+        settings = load_settings({"profile": "facts", "video_sources": ["pixabay"]}, {})
+        payload = ss.build_video_payload(settings.parse("Fact"), dict(settings.preset))
+        self.assertEqual(payload["video_source"], "pixabay")
+        explicit = ss.build_video_payload(settings.parse("Fact kaynak:coverr"), dict(settings.preset))
+        self.assertEqual(explicit["video_source"], "coverr")
+        with_source = {**settings.preset, "video_source": "pexels"}
+        self.assertEqual(ss.build_video_payload(settings.parse("Fact"), with_source)["video_source"], "pexels")
+
 
 def rendered(subject="Fact", video="/tmp/v.mp4"):
     return {"videos": [video], "title": f"{subject} #Shorts", "description": "d", "tags": ["shorts"],
