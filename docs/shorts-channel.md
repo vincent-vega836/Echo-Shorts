@@ -1,4 +1,4 @@
-# "Facts" YouTube Shorts kanalı — işletme kılavuzu
+# Atlas Grey — "facts" YouTube Shorts kanalı işletme kılavuzu
 
 Bu belge, 20 soruluk planlama anketinde verilen kararları ve bunları uygulayan
 araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
@@ -7,7 +7,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 
 | # | Konu | Karar |
 | --- | --- | --- |
-| 1 | Kanal kimliği | Sabit anlatıcı karakteri (isim henüz seçilmedi) |
+| 1 | Kanal kimliği | Sabit anlatıcı karakteri: **Atlas Grey** (kanal adı ve anlatıcı) |
 | 2 | Niş | Bilgi / ilginç gerçekler |
 | 3 | Kitle | ABD + global İngilizce |
 | 4 | Ton | Gizemli, merak uyandıran |
