@@ -107,8 +107,8 @@ Altyazı fontu Türkçe/Almanca karakterleri tam destekleyen `BeVietnamPro-Bold.
 
    ```bash
    python main.py                                  # MPT API
-   uv sync --extra slack
-   SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... uv run python slack_bot.py
+   SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \
+     uv run --with slack-bolt==1.30.0 python slack_bot.py
    ```
 
    Docker ile (`slack-bolt` imaja derleme sırasında kurulur):

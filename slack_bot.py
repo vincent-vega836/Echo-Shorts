@@ -2,8 +2,12 @@
 
 Run the API first (`python main.py`), then:
 
-    uv sync --extra slack
-    SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... uv run python slack_bot.py
+    SLACK_BOT_TOKEN=xoxb-... SLACK_APP_TOKEN=xapp-... \
+        uv run --with slack-bolt==1.30.0 python slack_bot.py
+
+slack-bolt stays out of the project lockfile because only this optional
+process needs it; the Dockerfile's INSTALL_SLACK build arg pins the same
+version.
 
 The bot uses Socket Mode, so it needs no public URL. See docs/slack-mila.md.
 
@@ -28,7 +32,7 @@ def main() -> int:
         from slack_bolt import App
         from slack_bolt.adapter.socket_mode import SocketModeHandler
     except ImportError:
-        logger.error("slack-bolt is not installed. Run: uv sync --extra slack")
+        logger.error("slack-bolt is not installed. Run: uv run --with slack-bolt==1.30.0 python slack_bot.py")
         return 1
 
     try:

@@ -92,7 +92,7 @@ RUN if [ "$PIP_USE_OFFICIAL" = "1" ]; then \
     fi
 
 # Optional Slack bot dependency (docker compose --profile slack). Keep the
-# version in sync with the "slack" extra in pyproject.toml.
+# version in sync with the `uv run --with` command in slack_bot.py.
 ARG INSTALL_SLACK=0
 RUN if [ "$INSTALL_SLACK" = "1" ]; then \
         pip install --no-cache-dir --retries 3 --timeout 60 "slack-bolt==1.30.0"; \
