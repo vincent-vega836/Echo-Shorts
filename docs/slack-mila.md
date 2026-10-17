@@ -85,18 +85,18 @@ Altyazı fontu Türkçe/Almanca karakterleri tam destekleyen `BeVietnamPro-Bold.
    bir token (`xapp-…`) oluşturun, uygulamayı workspace'e kurup bot token'ını
    (`xoxb-…`) alın. Botu `#brand-social` kanalına ekleyin.
 
-2. **Mila'yı izinli yapın** — Mila'nın bir mesajının bot ID'sini (`B…`) alın
-   (mesaj → *Copy link* ile API'de `bot_id` alanı) ve `allowed_bot_ids`'e yazın.
-   İzin listesinde olmayan botların `short:` mesajları yok sayılır.
+2. **Mila'yı izinli yapın** — Mila Novak'ın bot ID'si `B0C87P81QBG`; aşağıdaki
+   örnekte zaten yazılı. İzin listesinde olmayan botların `short:` mesajları
+   yok sayılır.
 
 3. **Yapılandırma** — `config.toml` içine (ya da `SLACK_<ANAHTAR>` ortam
    değişkenleri olarak):
 
    ```toml
    [slack]
-   allowed_channels = ["C0BRANDSOCIAL"]   # #brand-social kanal ID'si
-   allowed_bot_ids = ["B0MILA"]
-   approver_user_ids = ["U0DOGUKAN"]      # boşsa herkes onaylayabilir
+   allowed_channels = ["C0C86NYJ0T0"]     # #brand-social
+   allowed_bot_ids = ["B0C87P81QBG"]      # Mila Novak
+   approver_user_ids = ["U0C4G7H5B6V"]    # Doğukan; boşsa herkes onaylayabilir
    posting_slots = ["12:30", "19:00", "21:00"]
    ```
 
