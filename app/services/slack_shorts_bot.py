@@ -10,6 +10,7 @@ though the Slack SDK is an optional extra.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 import threading
 import time
@@ -24,7 +25,8 @@ from loguru import logger
 
 from app.services import slack_shorts as ss
 
-_PRESET_KEYS = ("font_name", "video_source", "script_prompt")
+_PRESET_KEYS = ("font_name", "video_source", "script_prompt", "elevenlabs_voice")
+_PUBLISH_PLATFORMS = ("youtube", "tiktok", "instagram")
 _MAX_ERROR_LENGTH = 300
 
 
@@ -37,13 +39,20 @@ class SlackSettings:
     allowed_channels: frozenset[str] = frozenset()
     allowed_bot_ids: frozenset[str] = frozenset()
     approver_user_ids: frozenset[str] = frozenset()
+    profile: str = "echo"
     default_language: str = "tr"
+    default_gender: str = "female"
     timezone: str = "Europe/Istanbul"
     posting_slots: tuple[str, ...] = ss.DEFAULT_POSTING_SLOTS
     max_parallel_jobs: int = 2
     poll_interval_seconds: float = 5
     job_timeout_seconds: float = 1800
     preset: Mapping[str, str] = field(default_factory=dict)
+    publish_platforms: tuple[str, ...] = ("youtube",)
+    queue_path: str = "storage/shorts/queue.json"
+
+    def parse(self, text: str) -> ss.ShortRequest:
+        return ss.parse_request(text, self.default_language, self.default_gender)
 
 
 def load_settings(
@@ -76,20 +85,42 @@ def load_settings(
             raise ValueError(f"[slack].{key} must be between {low:g} and {high:g}")
         return value
 
-    language = str(get("default_language", "tr")).lower()
+    try:
+        profile = ss.get_profile(str(get("profile", "echo")))
+    except ValueError as exc:
+        raise ValueError(f"[slack].{exc}") from None
+    language = str(get("default_language", profile.language)).lower()
     if language not in ss.VOICES:
         raise ValueError(f"[slack].default_language must be one of {sorted(ss.VOICES)}")
-    tz_name = str(get("timezone", "Europe/Istanbul"))
+    tz_name = str(get("timezone", profile.timezone))
     try:
         ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, ValueError):
         raise ValueError(f"[slack].timezone is not a valid IANA zone: {tz_name!r}") from None
-    slots = get("posting_slots", list(ss.DEFAULT_POSTING_SLOTS))
+    slots = get("posting_slots", list(profile.posting_slots))
     if isinstance(slots, str):
         slots = slots.replace(",", " ").split()
     slots = tuple(str(slot) for slot in slots)
     for slot in slots:
         ss.parse_slot(slot)
+    voice = str(get("elevenlabs_voice", ""))
+    if voice and not re.match(r"^elevenlabs:[^:\s]+:.+$", voice):
+        raise ValueError("[slack].elevenlabs_voice must look like 'elevenlabs:<voice_id>:<name>'")
+    platforms = get("publish_platforms", ["youtube"])
+    if isinstance(platforms, str):
+        platforms = platforms.replace(",", " ").split()
+    platforms = tuple(str(p).lower() for p in platforms)
+    unknown = sorted(set(platforms) - set(_PUBLISH_PLATFORMS))
+    if not platforms or unknown:
+        raise ValueError(f"[slack].publish_platforms must be a non-empty subset of {list(_PUBLISH_PLATFORMS)}")
+    preset = {key: str(get(key)) for key in _PRESET_KEYS if get(key)}
+    preset["profile"] = profile.name
+    sources = get("video_sources", [])
+    if isinstance(sources, str):
+        sources = sources.replace(",", " ").split()
+    if sources:
+        # Kept as one comma-separated string so the preset stays str -> str.
+        preset["video_sources"] = ",".join(str(src).strip().lower() for src in sources)
 
     return SlackSettings(
         bot_token=str(get("bot_token", "")),
@@ -99,13 +130,17 @@ def load_settings(
         allowed_channels=id_set("allowed_channels"),
         allowed_bot_ids=id_set("allowed_bot_ids"),
         approver_user_ids=id_set("approver_user_ids"),
+        profile=profile.name,
         default_language=language,
+        default_gender=profile.gender,
         timezone=tz_name,
         posting_slots=slots,
         max_parallel_jobs=int(number("max_parallel_jobs", 2, 1, 8)),
         poll_interval_seconds=number("poll_interval_seconds", 5, 1, 60),
         job_timeout_seconds=number("job_timeout_seconds", 1800, 60, 7200),
-        preset={key: str(section[key]) for key in _PRESET_KEYS if section.get(key)},
+        preset=preset,
+        publish_platforms=platforms,
+        queue_path=str(get("queue_path", "storage/shorts/queue.json")),
     )
 
 
@@ -206,7 +241,7 @@ class ShortsBot:
             respond(text="Bu kanalda Shorts üretimi kapalı.", response_type="ephemeral")
             return
         try:
-            request = ss.parse_request(text, self.settings.default_language)
+            request = self.settings.parse(text)
         except ss.ShortRequestError as exc:
             respond(text=str(exc), response_type="ephemeral")
             return
@@ -248,7 +283,7 @@ class ShortsBot:
             return
         thread_ts = event.get("thread_ts") or ts
         try:
-            request = ss.parse_request(event.get("text", ""), self.settings.default_language)
+            request = self.settings.parse(event.get("text", ""))
         except ss.ShortRequestError as exc:
             client.chat_postMessage(channel=channel, thread_ts=thread_ts, text=str(exc))
             return
@@ -337,7 +372,7 @@ class ShortsBot:
             )
 
     def _post_review(self, client, job_id: str, job: Job, script: str) -> None:
-        meta = ss.youtube_metadata(job.request, script)
+        meta = ss.youtube_metadata(job.request, script, self.settings.profile)
         slots = ss.next_posting_slots(self.now(), self.settings.posting_slots, self.settings.timezone)
         slot_text = ", ".join(ss.format_slot(slot) for slot in slots) or "—"
         blocks = [

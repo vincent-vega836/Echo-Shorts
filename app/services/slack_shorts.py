@@ -40,9 +40,10 @@ TRIGGER_PATTERN = re.compile(r"^\s*(?:/short\b|shorts?\s*:)\s*", re.IGNORECASE)
 AGENT_TRIGGER_PATTERN = re.compile(r"^\s*shorts?\s*:", re.IGNORECASE)
 MENTION_PATTERN = re.compile(r"<@[A-Z0-9]+(?:\|[^>]*)?>")
 OPTION_PATTERN = re.compile(
-    r"(?<!\S)(dil|lang|ses|voice|adet|count|format|aspect|kaynak|source)\s*:\s*(\S+)",
+    r"(?<!\S)(dil|lang|ses|voice|adet|count|format|aspect|kaynak|source|ref)\s*:\s*(\S+)",
     re.IGNORECASE,
 )
+MAX_REFERENCES = 5
 
 MAX_SUBJECT_LENGTH = 200
 MAX_SCRIPT_LENGTH = 5000
@@ -77,6 +78,7 @@ _OPTION_KEYS = {
     "adet": "count", "count": "count",
     "format": "aspect", "aspect": "aspect",
     "kaynak": "source", "source": "source",
+    "ref": "reference",
 }
 
 # ECHO brand voice: calm, orderly, careful. Passed to the LLM as extra script
@@ -89,6 +91,74 @@ ECHO_SCRIPT_PROMPT = (
 )
 
 DEFAULT_POSTING_SLOTS = ("12:30", "19:00", "21:00")
+
+# "facts" channel: English, mysterious one-fact Shorts for a US/global audience.
+FACTS_SCRIPT_PROMPT = (
+    "Write a 20-35 second YouTube Short (60-85 words) about ONE surprising, true "
+    "fact. Sentence one is a shocking but accurate claim that stops the scroll; "
+    "no 'Did you know'. Then explain why it is true in short, vivid sentences "
+    "with a mysterious, curious tone. Use only well-documented facts, no "
+    "invented numbers, no exaggeration, no emojis, no hashtags, never read URLs "
+    "aloud. The last sentence must lead naturally back into the first sentence "
+    "so the video loops."
+)
+
+
+@dataclass(frozen=True)
+class Profile:
+    """Channel-wide defaults applied to every request rendered for it."""
+
+    name: str
+    language: str
+    gender: str
+    script_prompt: str
+    timezone: str
+    posting_slots: tuple[str, ...]
+    subtitle_display_mode: str = "sentence"
+    subtitle_animation: str = "none"
+    font_size: int = 64
+    stroke_width: float = 2.0
+    clip_duration: int = 3
+    bgm_volume: float = 0.15
+    signature: str = ""
+    hashtags: tuple[str, ...] = ()
+
+
+PROFILES = {
+    "echo": Profile(
+        name="echo",
+        language="tr",
+        gender="female",
+        script_prompt=ECHO_SCRIPT_PROMPT,
+        timezone="Europe/Istanbul",
+        posting_slots=DEFAULT_POSTING_SLOTS,
+        signature="madebyecho.xyz",
+        hashtags=("shorts", "echo"),
+    ),
+    "facts": Profile(
+        name="facts",
+        language="en",
+        gender="male",
+        script_prompt=FACTS_SCRIPT_PROMPT,
+        # 12:30 New York = 19:30 Istanbul: US lunch break and European evening.
+        timezone="America/New_York",
+        posting_slots=("12:30",),
+        subtitle_display_mode="word_by_word",
+        subtitle_animation="pop_spring",
+        font_size=76,
+        stroke_width=3.0,
+        clip_duration=2,
+        bgm_volume=0.12,
+        hashtags=("shorts", "facts", "mystery"),
+    ),
+}
+
+
+def get_profile(name: str | None) -> Profile:
+    try:
+        return PROFILES[(name or "echo").lower()]
+    except KeyError:
+        raise ValueError(f"unknown profile {name!r}; choose one of {sorted(PROFILES)}") from None
 
 
 class ShortRequestError(ValueError):
@@ -104,10 +174,13 @@ class ShortRequest:
     count: int = 1
     aspect: str = "9:16"
     source: str = ""
+    references: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
 
-def parse_request(text: str, default_language: str = "tr") -> ShortRequest:
+def parse_request(
+    text: str, default_language: str = "tr", default_gender: str = "female"
+) -> ShortRequest:
     """Parse a Slack message body into a ShortRequest."""
     text = MENTION_PATTERN.sub("", text or "").strip()
     text = TRIGGER_PATTERN.sub("", text, count=1)
@@ -117,7 +190,7 @@ def parse_request(text: str, default_language: str = "tr") -> ShortRequest:
     if len(parts) == 2:
         header, script = parts[0], parts[1].strip()
 
-    request = ShortRequest(subject="", language=default_language)
+    request = ShortRequest(subject="", language=default_language, gender=default_gender)
     subject_lines = []
     for line in header.splitlines():
         for raw_key, raw_value in OPTION_PATTERN.findall(line):
@@ -164,37 +237,63 @@ def _apply_option(request: ShortRequest, key: str, raw_value: str) -> None:
             request.warnings.append(f"Bilinmeyen format `{raw_value}`, 9:16 kullanıldı.")
     elif key == "source":
         request.source = value
+    elif key == "reference":
+        url = raw_value.strip().rstrip(".,;")
+        if not re.match(r"^https?://[^\s/]+\.[^\s]+$", url):
+            request.warnings.append(f"Geçersiz kaynak linki `{raw_value}` atlandı.")
+        elif len(request.references) >= MAX_REFERENCES:
+            request.warnings.append(f"En fazla {MAX_REFERENCES} kaynak linki eklenir.")
+        elif url not in request.references:
+            request.references.append(url)
 
 
 def build_video_payload(request: ShortRequest, settings: dict | None = None) -> dict:
-    """Build the JSON body for POST /api/v1/videos with the brand preset."""
+    """Build the JSON body for POST /api/v1/videos with the channel preset.
+
+    `settings` may name a `profile` ("echo" or "facts") and override
+    `font_name`, `video_source`, `script_prompt` and `elevenlabs_voice`.
+    """
     settings = settings or {}
+    profile = get_profile(settings.get("profile"))
     voices = VOICES.get(request.language, VOICES["tr"])
+    voice = voices[request.gender]
+    # A configured ElevenLabs voice ("elevenlabs:<id>:<name>") replaces the
+    # free Edge voice for the profile's own language and gender only, so a
+    # one-off "dil:tr" request does not get an English narrator.
+    elevenlabs_voice = settings.get("elevenlabs_voice", "")
+    if (
+        elevenlabs_voice
+        and request.language == profile.language
+        and request.gender == profile.gender
+    ):
+        voice = elevenlabs_voice
     payload: dict[str, Any] = {
         "video_subject": request.subject,
         "video_script": request.script,
         "video_language": request.language,
         "video_aspect": request.aspect,
         "video_count": request.count,
-        "video_clip_duration": 3,
-        "voice_name": voices[request.gender],
+        "video_clip_duration": profile.clip_duration,
+        "voice_name": voice,
         "voice_rate": 1.05,
         "bgm_type": "random",
-        "bgm_volume": 0.15,
+        "bgm_volume": profile.bgm_volume,
         "subtitle_enabled": True,
         "subtitle_position": "two_thirds_bottom",
+        "subtitle_display_mode": profile.subtitle_display_mode,
+        "subtitle_animation": profile.subtitle_animation,
         # BeVietnamPro covers Latin Extended (ğ, ş, ı, İ, ä, ö, ü, ß) unlike
         # the CJK default font, so Turkish and German subtitles render fully.
         "font_name": settings.get("font_name", "BeVietnamPro-Bold.ttf"),
-        "font_size": 64,
-        "stroke_width": 2.0,
+        "font_size": profile.font_size,
+        "stroke_width": profile.stroke_width,
         "match_materials_to_script": True,
     }
     source = request.source or settings.get("video_source", "")
     if source:
         payload["video_source"] = source
     if not request.script:
-        payload["video_script_prompt"] = settings.get("script_prompt", ECHO_SCRIPT_PROMPT)
+        payload["video_script_prompt"] = settings.get("script_prompt", profile.script_prompt)
     return payload
 
 
@@ -240,17 +339,24 @@ def format_slot(slot: datetime) -> str:
     return f"{_TR_DAYS[slot.weekday()]} {slot:%d.%m %H:%M}"
 
 
-def youtube_metadata(request: ShortRequest, script: str = "") -> dict:
+def youtube_metadata(request: ShortRequest, script: str = "", profile: str | None = None) -> dict:
     """Draft title/description/tags for a human to review before publishing."""
+    channel = get_profile(profile)
     title = request.subject.strip()
     if len(title) > 90:
         title = title[:87].rstrip() + "..."
     title = f"{title} #Shorts"
+    parts = []
     body = (script or request.script).strip()
-    description = (body[:400] + "\n\n" if body else "") + "madebyecho.xyz"
+    if body:
+        parts.append(body[:400])
+    if request.references:
+        parts.append("Sources:\n" + "\n".join(request.references))
+    if channel.signature:
+        parts.append(channel.signature)
     words = re.findall(r"\w{4,}", request.subject.lower())
-    tags = ["shorts", "echo"] + list(dict.fromkeys(words))[:8]
-    return {"title": title, "description": description, "tags": tags}
+    tags = list(dict.fromkeys(list(channel.hashtags) + words))[:10]
+    return {"title": title, "description": "\n\n".join(parts), "tags": tags}
 
 
 class MptApiError(RuntimeError):

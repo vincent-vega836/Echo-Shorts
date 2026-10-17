@@ -101,7 +101,7 @@ class LoadSettingsTests(unittest.TestCase):
         self.assertEqual(settings.allowed_channels, frozenset({"C1"}))
         self.assertEqual(settings.allowed_bot_ids, frozenset({"B1", "B2"}))
         self.assertEqual(settings.mpt_api_key, "api-secret")
-        self.assertEqual(settings.preset, {"font_name": "Charm-Bold.ttf"})
+        self.assertEqual(settings.preset, {"font_name": "Charm-Bold.ttf", "profile": "echo"})
 
     def test_invalid_values_are_rejected_with_key_name(self):
         cases = [
