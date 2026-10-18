@@ -304,6 +304,19 @@ def _matches_video_aspect(
     return False
 
 
+def _pixabay_crop_to_fit_enabled(video_aspect: VideoAspect) -> bool:
+    """
+    Pixabay's video API has no orientation filter and offers few vertical clips,
+    so a 9:16 search often finds too little footage. With ``pixabay_crop_to_fit``
+    enabled, other-orientation clips whose short side still covers the canvas
+    are accepted; the default cover fit mode then centre-crops them instead of
+    adding black bars. Off by default to keep strict orientation matching.
+    """
+    return VideoAspect(video_aspect) != VideoAspect.square and bool(
+        config.app.get("pixabay_crop_to_fit", False)
+    )
+
+
 def _filter_materials_by_aspect(
     items: List[MaterialInfo],
     video_aspect: VideoAspect,
@@ -326,7 +339,10 @@ def _filter_materials_by_aspect(
         source_info = item.source_info if isinstance(item.source_info, dict) else {}
         rendition = source_info.get("rendition")
         rendition = rendition if isinstance(rendition, dict) else {}
-        if _matches_video_aspect(
+        cropped_by_choice = rendition.get("crop_to_fit") is True and (
+            _pixabay_crop_to_fit_enabled(aspect)
+        )
+        if cropped_by_choice or _matches_video_aspect(
             rendition.get("width"),
             rendition.get("height"),
             aspect,
@@ -506,12 +522,38 @@ def search_videos_pixabay(
             return []
 
         video_items = []
+        cropped_items = []
         if not isinstance(response, dict) or not isinstance(
             response.get("hits"), list
         ):
             logger.error("pixabay video search returned an unsupported response")
             return video_items
+        crop_to_fit = _pixabay_crop_to_fit_enabled(aspect)
         videos = response["hits"]
+
+        def build_item(v, duration, video_type, url, w, h, cropped):
+            item = MaterialInfo()
+            item.provider = "pixabay"
+            item.url = url
+            item.duration = duration
+            rendition = {"id": video_type, "width": w, "height": h}
+            if cropped:
+                rendition["crop_to_fit"] = True
+            item.source_info = {
+                "provider": "pixabay",
+                "search_term": search_term,
+                "asset_id": (str(v.get("id")) if v.get("id") is not None else None),
+                "source_page": _safe_public_url(v.get("pageURL")),
+                "creator": _creator_info(
+                    {
+                        "id": v.get("user_id"),
+                        "name": v.get("user"),
+                    }
+                ),
+                "rendition": rendition,
+            }
+            return item
+
         # loop through each video in the result
         for v in videos:
             if not isinstance(v, dict):
@@ -528,6 +570,7 @@ def search_videos_pixabay(
             video_files = v.get("videos")
             if not isinstance(video_files, dict):
                 continue
+            fallback = None
             # loop through each url to determine the best quality
             for video_type, video in video_files.items():
                 if not isinstance(video, dict):
@@ -546,32 +589,23 @@ def search_videos_pixabay(
                     _matches_video_aspect(w, h, aspect)
                 )
                 if orientation_matches and w >= video_width:
-                    item = MaterialInfo()
-                    item.provider = "pixabay"
-                    item.url = video_url
-                    item.duration = duration
-                    item.source_info = {
-                        "provider": "pixabay",
-                        "search_term": search_term,
-                        "asset_id": (
-                            str(v.get("id")) if v.get("id") is not None else None
-                        ),
-                        "source_page": _safe_public_url(v.get("pageURL")),
-                        "creator": _creator_info(
-                            {
-                                "id": v.get("user_id"),
-                                "name": v.get("user"),
-                            }
-                        ),
-                        "rendition": {
-                            "id": video_type,
-                            "width": w,
-                            "height": video.get("height"),
-                        },
-                    }
-                    video_items.append(item)
+                    video_items.append(
+                        build_item(v, duration, video_type, video_url, w, h, False)
+                    )
+                    fallback = None
                     break
-        return video_items
+                # Renditions are listed largest first, so the first one whose short
+                # side covers the canvas keeps the most detail after cropping.
+                if (
+                    crop_to_fit
+                    and fallback is None
+                    and min(w, h) >= min(video_width, video_height)
+                ):
+                    fallback = (video_type, video_url, w, h)
+            if fallback:
+                cropped_items.append(build_item(v, duration, *fallback, True))
+        # Native-orientation clips first; cropped ones only fill the gap.
+        return video_items + cropped_items
     except Exception as e:
         error_message = _redact_request_error(e, api_key)
         logger.error(

@@ -86,6 +86,10 @@ pexels_api_keys = []
 
 # Register at https://pixabay.com/api/docs/
 pixabay_api_keys = []
+# Pixabay has few vertical clips and no orientation filter, so 9:16 videos may
+# find too little footage. true also accepts landscape clips (at least 1080p)
+# and centre-crops them to fill the frame (with the default "cover" fit mode).
+# pixabay_crop_to_fit = false
 
 # Register at https://coverr.co/developers?ctx=header_navigation
 coverr_api_keys = []

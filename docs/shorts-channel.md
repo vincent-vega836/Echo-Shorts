@@ -53,6 +53,7 @@ gönderilmez, `needs_check` olur: Upload-Post panelinden kontrol edin.
 llm_provider = "claude_code"   # senaryolar Claude aboneliğiyle; API anahtarı gerekmez
 video_source = "pixabay"
 pixabay_api_keys = ["..."]
+pixabay_crop_to_fit = true      # Pixabay'da dikey video az; yatay 1080p+ klipleri kırpıp kullanır
 # coverr_api_keys = ["..."]    # isteğe bağlı ikinci görüntü kaynağı
 subtitle_provider = "edge"     # Edge sesi kelime zamanı verir; Whisper gerekmez
 upload_post_enabled = true
