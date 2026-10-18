@@ -147,6 +147,23 @@ class MptClientTests(unittest.TestCase):
             self.client.wait_for_task("t1", timeout=10, sleep=lambda _: None,
                                       clock=lambda: next(ticks))
 
+    def test_wait_survives_transient_poll_failures(self):
+        self.session.get.side_effect = [
+            ss.requests.ConnectionError("busy"),
+            ss.requests.Timeout("slow"),
+            _response(data={"data": {"state": 4, "progress": 40}}),
+            ss.requests.ConnectionError("busy"),
+            _response(data={"data": {"state": 1, "videos": ["v"]}}),
+        ]
+        task = self.client.wait_for_task("t1", sleep=lambda _: None, max_poll_failures=2)
+        self.assertEqual(task["videos"], ["v"])
+
+    def test_wait_gives_up_after_consecutive_poll_failures(self):
+        self.session.get.side_effect = ss.requests.ConnectionError("down")
+        with self.assertRaises(ss.requests.ConnectionError):
+            self.client.wait_for_task("t1", sleep=lambda _: None, max_poll_failures=2)
+        self.assertEqual(self.session.get.call_count, 3)
+
     def test_download_rebases_public_endpoint_onto_api_url(self):
         self.session.get.return_value = _response(chunks=[b"mp4"])
         with tempfile.TemporaryDirectory() as tmp:

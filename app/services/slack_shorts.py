@@ -417,11 +417,23 @@ class MptClient:
         timeout: float = 1800,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        max_poll_failures: int = 6,
     ) -> dict:
         deadline = clock() + timeout
         last_progress = None
+        failures = 0
         while True:
-            task = self.get_task(task_id)
+            # A render keeps the API busy for minutes; one slow or dropped poll
+            # must not abandon it. Only consecutive failures count.
+            try:
+                task = self.get_task(task_id)
+            except requests.RequestException:
+                failures += 1
+                if failures > max_poll_failures or clock() >= deadline:
+                    raise
+                sleep(poll_interval)
+                continue
+            failures = 0
             state = task.get("state")
             if state == TASK_STATE_COMPLETE:
                 return task

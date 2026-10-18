@@ -74,6 +74,14 @@ ve bu durumda `subtitle_provider = "whisper"` ile `[whisper] model_size = "small
 gerekir (ElevenLabs kelime zamanı vermez; araç ayar eksikse uyarır).
 Upload-Post'ta YouTube ve TikTok hesaplarını hesap sahibi bağlar; ajan şifre görmez.
 
+Sunucu (MoneyPrinterTurbo API) üretim boyunca açık kalmalı. macOS'ta kendi
+Terminal penceresinde, ön planda çalıştırın; `&` ile arka plana atılırsa
+alt süreçler terminale dokunduğunda macOS onu dondurur:
+
+```bash
+osascript -e 'tell application "Terminal" to do script "cd ~/Echo-Shorts && uv run python main.py"'
+```
+
 Saatlik yayın işi (macOS, `crontab -e`):
 
 ```cron
