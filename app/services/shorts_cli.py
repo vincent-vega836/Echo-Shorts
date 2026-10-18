@@ -228,7 +228,10 @@ def main(
     except (ss.MptApiError, shorts_compile.CompileError) as exc:
         return emit(1, {"error": str(exc)})
     except ss.requests.RequestException:
-        return emit(1, {"error": f"MPT API'ye ulaşılamadı: {settings.mpt_api_url}"})
+        return emit(1, {
+            "error": f"MPT API'ye ulaşılamadı: {settings.mpt_api_url} "
+            "(sunucu çalışıyor mu? Başka bir terminalde: uv run python main.py)"
+        })
     raise AssertionError(f"unhandled command {args.command}")  # pragma: no cover
 
 
