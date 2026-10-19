@@ -62,6 +62,14 @@ class FactsProfileTests(unittest.TestCase):
         self.assertEqual(stock["video_clip_duration"], 2)
         self.assertNotIn("video_terms_amount", stock)
 
+    def test_free_mixed_source_asks_for_archive_query_and_image_prompt(self):
+        settings = load_settings({"profile": "facts", "video_source": "mixed_image"}, {})
+        payload = ss.build_video_payload(settings.parse("Dancing plague"), dict(settings.preset))
+        self.assertEqual(payload["video_terms_prompt"], ss.FACTS_MIXED_PROMPT)
+        self.assertIn("::", payload["video_terms_prompt"])
+        self.assertEqual(payload["video_clip_duration"], 4)
+        TaskVideoRequest(**payload)
+
     def test_facts_profile_uses_free_deep_narrator_without_elevenlabs(self):
         settings = load_settings({"profile": "facts"}, {})
         payload = ss.build_video_payload(settings.parse("Your brain glows"), dict(settings.preset))

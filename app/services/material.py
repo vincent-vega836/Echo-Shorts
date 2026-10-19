@@ -21,6 +21,7 @@ from PIL import Image, UnidentifiedImageError
 from app.config import config
 from app.models.schema import MaterialInfo, VideoAspect, VideoConcatMode
 from app.services import (
+    free_images,
     material_cache,
     metaso_minimax,
     muapi,
@@ -1776,9 +1777,12 @@ def _download_videos_openai_image_on_demand(
     audio_duration: float,
     max_clip_duration: int,
     material_directory: str,
+    generate_images: Callable[..., List[MaterialInfo]] | None = None,
 ) -> List[str]:
     """
     按脚本片段顺序逐张生成 OpenAI 兼容文生图素材，凑够所需总时长立即停止。
+
+    ``generate_images`` lets a free source (``mixed_image``) reuse this loop.
 
     与 WaveSpeed 按需生成同一付费安全语义：文生图按张计费，先全量生成再
     挑选会为用不到的画面付费。每张图片生成后立即渲染成 mp4 片段并累计
@@ -1808,9 +1812,10 @@ def _download_videos_openai_image_on_demand(
         _persist_material_sources(task_id, material_sources)
         return video_paths
 
+    generate_images = generate_images or generate_images_openai
     for search_term in search_terms:
         try:
-            items = generate_images_openai(
+            items = generate_images(
                 search_term=search_term,
                 minimum_duration=max_clip_duration,
                 video_aspect=video_aspect,
@@ -2268,6 +2273,21 @@ def download_videos(
             audio_duration=audio_duration,
             max_clip_duration=max_clip_duration,
             material_directory=material_directory,
+        )
+    if source == "mixed_image":
+        # Free: public-domain archive pictures first, local text-to-image
+        # for the rest. One picture per term; no picture repeats in a video.
+        used_titles: set[str] = set()
+        return _download_videos_openai_image_on_demand(
+            task_id=task_id,
+            search_terms=search_terms,
+            video_aspect=video_aspect,
+            audio_duration=audio_duration,
+            max_clip_duration=max_clip_duration,
+            material_directory=material_directory,
+            generate_images=lambda **kwargs: free_images.generate_images_mixed(
+                used=used_titles, **kwargs
+            ),
         )
     if source == "openai_image":
         # 与 WaveSpeed 相同的按需付费语义：文生图按张计费，逐段生成、凑够

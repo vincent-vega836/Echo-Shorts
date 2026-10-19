@@ -16,7 +16,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 7 | Kanca | Şok edici ama doğru iddia (ilk 2 sn) |
 | 8 | Yapı | Video başına tek, derin gerçek |
 | 9 | Altyazı | Kelime kelime vurgulu; alt üçte birlik bölgede (%74), YouTube/TikTok arayüzünün üstünde |
-| 10 | Görüntü | Her cümleye özel AI görseli (`video_source = "openai_image"`): döneme uygun, fotogerçekçi, sinematik; 4 sn yavaş zoom, video başına en fazla 10 görsel (`FACTS_SCENE_PROMPT`). Pixabay yalnızca yedek: tarih/gizem konularında stok görüntü senaryoya oturmuyor |
+| 10 | Görüntü | Ücretsiz karma kaynak (`video_source = "mixed_image"`): her sahne için önce Wikimedia Commons'ta gerçek, kamu malı tarihî görsel (tablo, gravür, fotoğraf); yoksa Mac'te yerel FLUX (mflux) ile fotogerçekçi görsel. 4 sn yavaş zoom, yatay tablolar bulanık arka planlı dikey kadraja oturur. Ücretli alternatif: `openai_image` |
 | 11 | Ses | Ücretsiz Edge sesi `en-US-AndrewMultilingualNeural` (sıcak, doğal anlatıcı; dinleyerek seçildi); ElevenLabs istenmedi |
 | 12 | Müzik | Kısık gerilim/ambient |
 | 13 | Saat | Her gün 12:30 New York (= 19:30 İstanbul) |
@@ -27,7 +27,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 18 | Konu seçimi | Mila + trend verisi |
 | 19 | Rapor | Haftalık Cuma raporu |
 | 20 | Ek gelir | Aylık uzun video derlemesi |
-| — | Sıklık / bütçe | Günde 1 Short; senaryo ve ses 0 $, görüntü OpenAI görsel API (kullanım kadar) |
+| — | Sıklık / bütçe | Günde 1 Short; senaryo ve ses 0 $, görüntü Wikimedia + yerel FLUX, toplam ~0 $ |
 
 ## Haftalık akış
 
@@ -51,7 +51,9 @@ gönderilmez, `needs_check` olur: Upload-Post panelinden kontrol edin.
 ```toml
 [app]
 llm_provider = "claude_code"   # senaryolar Claude aboneliğiyle; API anahtarı gerekmez
-video_source = "openai_image"   # her cümleye özel AI görseli
+video_source = "mixed_image"    # ücretsiz: Wikimedia + yerel FLUX
+local_image_command = "mflux-generate --model schnell --quantize 4 --steps 4 --width {width} --height {height} --seed {seed} --prompt {prompt} --output {output}"
+# Ücretli alternatif: video_source = "openai_image" ve aşağıdaki openai_image_* ayarları
 openai_image_base_url = "https://api.openai.com/v1"
 openai_image_api_keys = ["..."]  # platform.openai.com → API keys
 openai_image_model = "gpt-image-1-mini"
@@ -70,7 +72,7 @@ upload_post_youtube_privacy_status = "public"
 
 [slack]
 profile = "facts"
-video_sources = ["openai_image"]
+video_sources = ["mixed_image"]
 publish_platforms = ["youtube", "tiktok"]
 queue_path = "storage/shorts/queue.json"
 ```
@@ -119,7 +121,7 @@ yazılırsa senaryo olduğu gibi kullanılır.
 | --- | --- |
 | Senaryo (Claude aboneliği, `claude_code`) | 0 $ ek maliyet |
 | Ses (Edge TTS), MoneyPrinterTurbo | 0 $ |
-| AI görseller (OpenAI, ~9 görsel/video, ~270/ay) | Model ve kaliteye göre değişir; ilk hafta OpenAI panelinden gerçek tutarı kontrol edin, gerekirse `openai_image_quality = "low"` |
+| Görseller (Wikimedia + Mac'te yerel FLUX) | 0 $ (yalnız Mac'in elektriği; görsel başına ~1 dk) |
 | Upload-Post | Ücretsiz katman yetmezse ücretli plan |
 
 ## Gerçekçi beklenti ve riskler

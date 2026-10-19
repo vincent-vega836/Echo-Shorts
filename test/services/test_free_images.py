@@ -1,0 +1,176 @@
+import io
+import os
+import shutil
+import subprocess
+import tempfile
+import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from PIL import Image
+
+from app.config import config
+from app.models.schema import VideoAspect
+from app.services import free_images, material
+
+
+def _png(width=1600, height=900, color=(120, 80, 40)):
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="image/jpeg"):
+    return {
+        "index": index,
+        "title": title,
+        "imageinfo": [{
+            "url": f"https://upload.example/{index}.jpg",
+            "thumburl": f"https://upload.example/thumb/{index}.jpg",
+            "descriptionurl": f"https://commons.wikimedia.org/wiki/{title}",
+            "width": width,
+            "height": height,
+            "mime": mime,
+            "extmetadata": {"License": {"value": license_id}, "LicenseShortName": {"value": license_id}},
+        }],
+    }
+
+
+class FakeSession:
+    def __init__(self, pages, image=b"img"):
+        self.pages = pages
+        self.image = image
+        self.downloads = []
+
+    def get(self, url, params=None, headers=None, timeout=None):
+        assert headers and "EchoShorts" in headers["User-Agent"]
+        if url == free_images.COMMONS_API:
+            pages = {str(p["index"]): p for p in self.pages}
+            return SimpleNamespace(json=lambda: {"query": {"pages": pages}})
+        self.downloads.append(url)
+        return SimpleNamespace(status_code=200, content=self.image)
+
+
+class FreeImagesTests(unittest.TestCase):
+    def setUp(self):
+        self.original_app_config = dict(config.app)
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def tearDown(self):
+        config.app.clear()
+        config.app.update(self.original_app_config)
+
+    def test_split_term(self):
+        self.assertEqual(
+            free_images.split_term("dancing plague 1518 :: a woman dancing on a cobbled street"),
+            ("dancing plague 1518", "a woman dancing on a cobbled street"),
+        )
+        self.assertEqual(free_images.split_term("crowd dancing"), ("crowd dancing", "crowd dancing"))
+        self.assertEqual(free_images.split_term(":: only prompt"), ("only prompt", "only prompt"))
+
+    def test_commons_takes_first_free_large_unused_picture(self):
+        session = FakeSession([
+            _commons_page(1, "File:Used.jpg"),
+            _commons_page(2, "File:Licensed.jpg", license_id="cc-by-sa-4.0"),
+            _commons_page(3, "File:Tiny.jpg", width=400, height=300),
+            _commons_page(4, "File:Animated.gif", mime="image/gif"),
+            _commons_page(5, "File:Brueghel.jpg", license_id="pd"),
+        ])
+        used = {"File:Used.jpg"}
+        image, source = free_images.search_commons("dancing plague", used, session=session)
+        self.assertEqual(image, b"img")
+        self.assertEqual(source["asset_id"], "File:Brueghel.jpg")
+        self.assertEqual(session.downloads, ["https://upload.example/thumb/5.jpg"])
+        self.assertIn("File:Brueghel.jpg", used)
+        # CC0 counts as free, attribution licences do not.
+        self.assertTrue(free_images._is_free_license({"License": {"value": "cc0"}}))
+        self.assertFalse(free_images._is_free_license({"License": {"value": "cc-by-4.0"}}))
+
+    def test_commons_returns_none_without_a_free_match(self):
+        session = FakeSession([_commons_page(1, "File:A.jpg", license_id="cc-by-4.0")])
+        self.assertIsNone(free_images.search_commons("x", set(), session=session))
+
+    def test_local_command_fills_placeholders_per_argument(self):
+        config.app["local_image_command"] = (
+            "mflux-generate --prompt {prompt} --width {width} --height {height} --output {output}"
+        )
+        config.app["local_image_prompt_template"] = "photo of {term}"
+        calls = []
+
+        def fake_run(command, **kwargs):
+            calls.append(command)
+            with open(command[command.index("--output") + 1], "wb") as f:
+                f.write(b"generated")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        data = free_images.generate_local("a woman; rm -rf /", VideoAspect.portrait, self.tmp, run=fake_run)
+        self.assertEqual(data, b"generated")
+        command = calls[0]
+        # The whole prompt is one argument: no shell, no injection.
+        self.assertEqual(command[command.index("--prompt") + 1], "photo of a woman; rm -rf /")
+        self.assertEqual(command[command.index("--width") + 1], "720")
+        self.assertEqual(command[command.index("--height") + 1], "1280")
+        self.assertEqual(os.listdir(self.tmp), [])
+
+    def test_local_command_unset_or_failing_gives_none(self):
+        config.app.pop("local_image_command", None)
+        self.assertIsNone(free_images.generate_local("x", VideoAspect.portrait, self.tmp))
+        config.app["local_image_command"] = "gen --output {output}"
+        failed = lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "boom")  # noqa: E731
+        self.assertIsNone(free_images.generate_local("x", VideoAspect.portrait, self.tmp, run=failed))
+
+    def test_landscape_painting_is_framed_whole_on_portrait_canvas(self):
+        canvas = free_images.frame_for_canvas(_png(1600, 900), VideoAspect.portrait)
+        self.assertEqual(canvas.size, (1080, 1920))
+        # Centre shows the painting itself, top edge the darker blurred fill.
+        self.assertEqual(canvas.getpixel((540, 960)), (120, 80, 40))
+        self.assertLess(sum(canvas.getpixel((540, 20))), sum((120, 80, 40)))
+        with self.assertRaises(free_images.FreeImageError):
+            free_images.frame_for_canvas(b"not an image", VideoAspect.portrait)
+
+    def test_mixed_prefers_archive_then_falls_back_to_local(self):
+        commons_calls, local_calls = [], []
+
+        def commons(query, used):
+            commons_calls.append(query)
+            return (_png(), {"provider": "wikimedia_commons", "asset_id": "File:A.jpg",
+                             "source_page": "https://commons.wikimedia.org/wiki/File:A.jpg"}) if query == "found" else None
+
+        def local(prompt, aspect, out_dir):
+            local_calls.append(prompt)
+            return _png(720, 1280)
+
+        archive = free_images.generate_images_mixed(
+            "found :: a scene", 4, save_dir=self.tmp, commons=commons, local=local)
+        generated = free_images.generate_images_mixed(
+            "missing :: a woman dancing", 4, save_dir=self.tmp, commons=commons, local=local)
+
+        self.assertEqual(archive[0].source_info["provider"], "wikimedia_commons")
+        self.assertEqual(generated[0].source_info["provider"], "local_image")
+        self.assertEqual(local_calls, ["a woman dancing"])
+        for item in archive + generated:
+            self.assertEqual(item.provider, "mixed_image")
+            self.assertEqual(item.duration, 4)
+            with Image.open(item.url) as saved:
+                self.assertEqual(saved.size, (1080, 1920))
+
+        nothing = free_images.generate_images_mixed(
+            "missing :: x", 4, save_dir=self.tmp, commons=commons, local=lambda *a: None)
+        self.assertEqual(nothing, [])
+
+    def test_material_routes_mixed_source_through_the_image_loop(self):
+        with patch.object(material, "_download_videos_openai_image_on_demand", return_value=["a.mp4"]) as loop:
+            result = material.download_videos(
+                task_id="t", search_terms=["q :: p"], source="mixed_image",
+                audio_duration=10, max_clip_duration=4,
+            )
+        self.assertEqual(result, ["a.mp4"])
+        generate = loop.call_args.kwargs["generate_images"]
+        with patch.object(free_images, "generate_images_mixed", return_value=[]) as mixed:
+            generate(search_term="q :: p", minimum_duration=4, video_aspect=VideoAspect.portrait, save_dir="")
+        self.assertIsInstance(mixed.call_args.kwargs["used"], set)
+
+
+if __name__ == "__main__":
+    unittest.main()

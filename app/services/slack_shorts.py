@@ -132,9 +132,23 @@ FACTS_SCENE_PROMPT = (
     "the scene, no gore, no likeness of real living people, no abstract ideas."
 )
 
-# Material sources that generate a picture per term instead of searching a
-# stock library; they get FACTS_SCENE_PROMPT-style terms and slower cuts.
-IMAGE_SOURCES = frozenset({"openai_image"})
+# Free source: a real public-domain picture from Wikimedia Commons when one
+# exists, a locally generated one otherwise. Each term carries both halves.
+FACTS_MIXED_PROMPT = (
+    "Each term illustrates ONE moment of the narration, in script order, and "
+    "has the form '<archive query> :: <image prompt>'. The archive query is "
+    "2-5 words to find a real historical picture of exactly that moment on "
+    "Wikimedia Commons: names, places, years and artists are welcome (e.g. "
+    "'dancing plague 1518', 'Brueghel dancing pilgrims', 'Strasbourg 16th "
+    "century engraving'). The image prompt is 12-25 words describing a "
+    "realistic photograph of the same moment: who, doing what, where, era-"
+    "accurate clothing and architecture, light, camera framing; one consistent "
+    "look across terms; no text, logos, gore or likeness of real living people."
+)
+
+# Material sources that build a picture per term instead of searching a stock
+# video library; they get scene-style terms and slower cuts.
+IMAGE_SOURCES = frozenset({"openai_image", "mixed_image"})
 
 # Subtitle baseline as a percentage of the frame height. ~74% sits in the
 # lower third yet clear of the YouTube Shorts title/channel overlay and the
@@ -167,6 +181,7 @@ class Profile:
     # Rules, seconds per image and image count when the source is an AI image
     # generator; one image per term, so terms x seconds must cover the narration.
     scene_prompt: str = ""
+    mixed_scene_prompt: str = ""
     image_clip_duration: int = 4
     image_count: int = 10
 
@@ -189,6 +204,7 @@ PROFILES = {
         script_prompt=FACTS_SCRIPT_PROMPT,
         terms_prompt=FACTS_TERMS_PROMPT,
         scene_prompt=FACTS_SCENE_PROMPT,
+        mixed_scene_prompt=FACTS_MIXED_PROMPT,
         # 12:30 New York = 19:30 Istanbul: US lunch break and European evening.
         timezone="America/New_York",
         posting_slots=("12:30",),
@@ -353,7 +369,8 @@ def build_video_payload(request: ShortRequest, settings: dict | None = None) -> 
     if source in IMAGE_SOURCES and profile.scene_prompt:
         # A still needs longer on screen than a stock clip, and 10 x 4 s covers
         # the longest (35 s) script; generation stops once narration is covered.
-        payload["video_terms_prompt"] = profile.scene_prompt
+        mixed = source == "mixed_image" and profile.mixed_scene_prompt
+        payload["video_terms_prompt"] = profile.mixed_scene_prompt if mixed else profile.scene_prompt
         payload["video_terms_amount"] = profile.image_count
         payload["video_clip_duration"] = profile.image_clip_duration
     elif profile.terms_prompt:
