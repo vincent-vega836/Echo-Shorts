@@ -15,8 +15,8 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 6 | Süre | 20-35 sn |
 | 7 | Kanca | Şok edici ama doğru iddia (ilk 2 sn) |
 | 8 | Yapı | Video başına tek, derin gerçek |
-| 9 | Altyazı | Kelime kelime vurgulu |
-| 10 | Görüntü | Pixabay (Pexels yeni anahtar vermiyor); Coverr eklenirse dönüşümlü |
+| 9 | Altyazı | Kelime kelime vurgulu; alt üçte birlik bölgede (%74), YouTube/TikTok arayüzünün üstünde |
+| 10 | Görüntü | Pixabay (Pexels yeni anahtar vermiyor); Coverr eklenirse dönüşümlü. Arama terimleri stokta bulunan somut sahneler olmalı (özel isim, yıl, soyut kavram yok; `FACTS_TERMS_PROMPT`) |
 | 11 | Ses | Ücretsiz Edge sesi `en-US-AndrewMultilingualNeural` (sıcak, doğal anlatıcı; dinleyerek seçildi); ElevenLabs istenmedi |
 | 12 | Müzik | Kısık gerilim/ambient |
 | 13 | Saat | Her gün 12:30 New York (= 19:30 İstanbul) |

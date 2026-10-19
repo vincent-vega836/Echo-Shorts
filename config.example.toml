@@ -689,6 +689,7 @@ open_task_folder_on_completion = true
 # paragraph_number = 1
 # video_script_prompt = ""
 # custom_system_prompt = ""
+# video_terms_prompt = ""      # extra rules for stock-footage search terms (API/CLI only)
 # loomloom_candidate_count = 3
 # loomloom_script_duration_seconds = 60
 # loomloom_video_scene_count = 1

@@ -56,6 +56,7 @@ class PayloadTests(unittest.TestCase):
         payload = ss.build_video_payload(ss.parse_request("Sakin planlama ses:erkek"))
         self.assertEqual(payload["voice_name"], "tr-TR-AhmetNeural-Male")
         self.assertEqual(payload["video_script_prompt"], ss.ECHO_SCRIPT_PROMPT)
+        self.assertNotIn("video_terms_prompt", payload)
         self.assertNotIn("video_source", payload)
         TaskVideoRequest(**payload)
 

@@ -90,6 +90,17 @@ class TestTaskService(unittest.TestCase):
             custom_system_prompt="Only write short narration.",
         )
 
+    def test_generate_terms_forwards_terms_prompt(self):
+        params = VideoParams(
+            video_subject="x",
+            match_materials_to_script=True,
+            video_terms_prompt="concrete scenes only",
+        )
+        with patch.object(tm.llm, "generate_terms", return_value=["street"]) as generate:
+            self.assertEqual(tm.generate_terms("task-id", params, "script"), ["street"])
+        self.assertEqual(generate.call_args.kwargs["video_terms_prompt"], "concrete scenes only")
+        self.assertEqual(generate.call_args.kwargs["amount"], 8)
+
     def test_generate_final_videos_forwards_clip_speed_and_fit_mode(self):
         """任务编排层必须把画面速度和适配模式传给视频合成服务。"""
         params = VideoParams(
@@ -863,6 +874,7 @@ class TestTaskService(unittest.TestCase):
             video_script="先城市，再地铁",
             amount=8,
             match_script_order=True,
+            video_terms_prompt="",
         )
 
     def test_start_stops_before_materials_when_term_provider_fails(self):

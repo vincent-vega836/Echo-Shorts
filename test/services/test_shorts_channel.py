@@ -36,6 +36,12 @@ class FactsProfileTests(unittest.TestCase):
         self.assertEqual(payload["subtitle_animation"], "pop_spring")
         self.assertEqual(payload["video_clip_duration"], 2)
         self.assertEqual(payload["video_script_prompt"], ss.FACTS_SCRIPT_PROMPT)
+        # Footage must be findable on Pixabay: concrete scenes, no proper nouns.
+        self.assertEqual(payload["video_terms_prompt"], ss.FACTS_TERMS_PROMPT)
+        self.assertIn("no proper nouns", payload["video_terms_prompt"])
+        # Lower third, above the Shorts/TikTok UI overlay, never mid-frame.
+        self.assertEqual(payload["subtitle_position"], "custom")
+        self.assertTrue(65 <= payload["custom_position"] <= 80)
         TaskVideoRequest(**payload)
 
     def test_facts_profile_uses_free_deep_narrator_without_elevenlabs(self):

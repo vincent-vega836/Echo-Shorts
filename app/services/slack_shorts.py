@@ -95,13 +95,34 @@ DEFAULT_POSTING_SLOTS = ("12:30", "19:00", "21:00")
 # "facts" channel: English, mysterious one-fact Shorts for a US/global audience.
 FACTS_SCRIPT_PROMPT = (
     "Write a 20-35 second YouTube Short (60-85 words) about ONE surprising, true "
-    "fact. Sentence one is a shocking but accurate claim that stops the scroll; "
-    "no 'Did you know'. Then explain why it is true in short, vivid sentences "
-    "with a mysterious, curious tone. Use only well-documented facts, no "
-    "invented numbers, no exaggeration, no emojis, no hashtags, never read URLs "
-    "aloud. The last sentence must lead naturally back into the first sentence "
-    "so the video loops."
+    "fact. Sentence one is the hook: a shocking but accurate claim of at most 12 "
+    "words that states the strangest part of the fact outright; no scene-setting, "
+    "no dates first, no 'Did you know'. Then explain why it is true in short, "
+    "vivid sentences with a mysterious, curious tone. Use only well-documented "
+    "facts, no invented numbers, no exaggeration, no emojis, no hashtags, never "
+    "read URLs aloud. The last sentence must lead naturally back into the first "
+    "sentence so the video loops."
 )
+
+# Stock libraries index what the camera sees, not what the story means:
+# "medieval Strasbourg street" or "dancing plague mystery" return nothing on
+# Pixabay, while "cobblestone street night" and "crowd dancing" do.
+FACTS_TERMS_PROMPT = (
+    "Each term names a concrete, filmable scene that a stock-footage library "
+    "(Pixabay, Pexels) certainly has: a person, crowd, place, object, animal, "
+    "weather or light, e.g. 'cobblestone street night', 'crowd dancing', "
+    "'exhausted man lying', 'candle flame dark', 'old town square', 'fog forest'. "
+    "Use common English nouns only: no proper nouns, place or people names, "
+    "years, numbers, events, emotions or abstract ideas (no 'mystery', "
+    "'hysteria', 'plague', 'history'). Prefer moody, cinematic, realistic "
+    "live-action scenes over animation or cartoons. Every term must look right "
+    "next to the sentence it illustrates."
+)
+
+# Subtitle baseline as a percentage of the frame height. ~74% sits in the
+# lower third yet clear of the YouTube Shorts title/channel overlay and the
+# TikTok caption area, which cover roughly the bottom 20% of the screen.
+SUBTITLE_POSITION_PERCENT = 74.0
 
 
 @dataclass(frozen=True)
@@ -124,6 +145,8 @@ class Profile:
     hashtags: tuple[str, ...] = ()
     # Free Edge voice for the profile's own language and gender; empty uses VOICES.
     voice: str = ""
+    # Extra rules for the stock-footage search terms; empty keeps the API default.
+    terms_prompt: str = ""
 
 
 PROFILES = {
@@ -142,6 +165,7 @@ PROFILES = {
         language="en",
         gender="male",
         script_prompt=FACTS_SCRIPT_PROMPT,
+        terms_prompt=FACTS_TERMS_PROMPT,
         # 12:30 New York = 19:30 Istanbul: US lunch break and European evening.
         timezone="America/New_York",
         posting_slots=("12:30",),
@@ -284,7 +308,8 @@ def build_video_payload(request: ShortRequest, settings: dict | None = None) -> 
         "bgm_type": "random",
         "bgm_volume": profile.bgm_volume,
         "subtitle_enabled": True,
-        "subtitle_position": "two_thirds_bottom",
+        "subtitle_position": "custom",
+        "custom_position": SUBTITLE_POSITION_PERCENT,
         "subtitle_display_mode": profile.subtitle_display_mode,
         "subtitle_animation": profile.subtitle_animation,
         # BeVietnamPro covers Latin Extended (ğ, ş, ı, İ, ä, ö, ü, ß) unlike
@@ -302,6 +327,8 @@ def build_video_payload(request: ShortRequest, settings: dict | None = None) -> 
         payload["video_source"] = source
     if not request.script:
         payload["video_script_prompt"] = settings.get("script_prompt", profile.script_prompt)
+    if profile.terms_prompt:
+        payload["video_terms_prompt"] = profile.terms_prompt
     return payload
 
 
