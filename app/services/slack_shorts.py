@@ -112,12 +112,29 @@ FACTS_TERMS_PROMPT = (
     "(Pixabay, Pexels) certainly has: a person, crowd, place, object, animal, "
     "weather or light, e.g. 'cobblestone street night', 'crowd dancing', "
     "'exhausted man lying', 'candle flame dark', 'old town square', 'fog forest'. "
-    "Use common English nouns only: no proper nouns, place or people names, "
+    "Each term is 2-4 words. Use common English nouns only: no proper nouns, "
+    "place or people names, "
     "years, numbers, events, emotions or abstract ideas (no 'mystery', "
     "'hysteria', 'plague', 'history'). Prefer moody, cinematic, realistic "
     "live-action scenes over animation or cartoons. Every term must look right "
     "next to the sentence it illustrates."
 )
+
+# With an AI image source each "term" is a text-to-image prompt, so it can
+# show exactly what the narration says, era and place included.
+FACTS_SCENE_PROMPT = (
+    "Each term is a text-to-image prompt of 12-25 words for ONE moment of the "
+    "narration, in script order, so every image matches the sentence spoken "
+    "over it. Describe a realistic photograph: who, doing what, where, era-"
+    "accurate clothing and architecture, time of day, light, camera framing "
+    "(close-up, wide shot, low angle). Keep one consistent look across all "
+    "terms. Concrete and visual only: no text, signs, captions or logos in "
+    "the scene, no gore, no likeness of real living people, no abstract ideas."
+)
+
+# Material sources that generate a picture per term instead of searching a
+# stock library; they get FACTS_SCENE_PROMPT-style terms and slower cuts.
+IMAGE_SOURCES = frozenset({"openai_image"})
 
 # Subtitle baseline as a percentage of the frame height. ~74% sits in the
 # lower third yet clear of the YouTube Shorts title/channel overlay and the
@@ -147,6 +164,11 @@ class Profile:
     voice: str = ""
     # Extra rules for the stock-footage search terms; empty keeps the API default.
     terms_prompt: str = ""
+    # Rules, seconds per image and image count when the source is an AI image
+    # generator; one image per term, so terms x seconds must cover the narration.
+    scene_prompt: str = ""
+    image_clip_duration: int = 4
+    image_count: int = 10
 
 
 PROFILES = {
@@ -166,6 +188,7 @@ PROFILES = {
         gender="male",
         script_prompt=FACTS_SCRIPT_PROMPT,
         terms_prompt=FACTS_TERMS_PROMPT,
+        scene_prompt=FACTS_SCENE_PROMPT,
         # 12:30 New York = 19:30 Istanbul: US lunch break and European evening.
         timezone="America/New_York",
         posting_slots=("12:30",),
@@ -327,7 +350,13 @@ def build_video_payload(request: ShortRequest, settings: dict | None = None) -> 
         payload["video_source"] = source
     if not request.script:
         payload["video_script_prompt"] = settings.get("script_prompt", profile.script_prompt)
-    if profile.terms_prompt:
+    if source in IMAGE_SOURCES and profile.scene_prompt:
+        # A still needs longer on screen than a stock clip, and 10 x 4 s covers
+        # the longest (35 s) script; generation stops once narration is covered.
+        payload["video_terms_prompt"] = profile.scene_prompt
+        payload["video_terms_amount"] = profile.image_count
+        payload["video_clip_duration"] = profile.image_clip_duration
+    elif profile.terms_prompt:
         payload["video_terms_prompt"] = profile.terms_prompt
     return payload
 

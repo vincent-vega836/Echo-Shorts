@@ -44,6 +44,24 @@ class FactsProfileTests(unittest.TestCase):
         self.assertTrue(65 <= payload["custom_position"] <= 80)
         TaskVideoRequest(**payload)
 
+    def test_ai_image_source_gets_scene_prompts_and_slower_cuts(self):
+        settings = load_settings({"profile": "facts", "video_source": "openai_image"}, {})
+        payload = ss.build_video_payload(settings.parse("Dancing plague"), dict(settings.preset))
+        self.assertEqual(payload["video_source"], "openai_image")
+        self.assertEqual(payload["video_terms_prompt"], ss.FACTS_SCENE_PROMPT)
+        self.assertEqual(payload["video_clip_duration"], 4)
+        # One image per term: the terms must cover a 35 s script.
+        self.assertGreaterEqual(payload["video_terms_amount"] * payload["video_clip_duration"], 35)
+        TaskVideoRequest(**payload)
+
+        stock = ss.build_video_payload(
+            load_settings({"profile": "facts", "video_source": "pixabay"}, {}).parse("x"),
+            {"profile": "facts", "video_source": "pixabay"},
+        )
+        self.assertEqual(stock["video_terms_prompt"], ss.FACTS_TERMS_PROMPT)
+        self.assertEqual(stock["video_clip_duration"], 2)
+        self.assertNotIn("video_terms_amount", stock)
+
     def test_facts_profile_uses_free_deep_narrator_without_elevenlabs(self):
         settings = load_settings({"profile": "facts"}, {})
         payload = ss.build_video_payload(settings.parse("Your brain glows"), dict(settings.preset))

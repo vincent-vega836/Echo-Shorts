@@ -1709,6 +1709,10 @@ def generate_images_openai(
         "n": 1,
         "size": image_size,
     }
+    # Optional: the official API bills by quality ("low"/"medium"/"high").
+    quality = str(config.app.get("openai_image_quality", "") or "").strip()
+    if quality:
+        payload["quality"] = quality
     logger.info(
         f"generating image via openai-compatible endpoint: model={model}, "
         f"term={search_term!r}, size={image_size}"

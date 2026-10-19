@@ -210,6 +210,9 @@ openai_image_size = ""
 # placeholder to inject the keyword; leave empty to send terms as-is.
 # Example: "cinematic photo of {term}, photorealistic, high detail"
 openai_image_prompt_template = ""
+# Optional quality sent to the endpoint ("low", "medium", "high"); the official
+# OpenAI API bills per image by quality. Leave empty to use the model default.
+openai_image_quality = ""
 
 # Optional TwelveLabs integration for semantic material ranking and video QA.
 # Install the optional dependency with: uv sync --extra twelvelabs
@@ -689,7 +692,7 @@ open_task_folder_on_completion = true
 # paragraph_number = 1
 # video_script_prompt = ""
 # custom_system_prompt = ""
-# video_terms_prompt = ""      # extra rules for stock-footage search terms (API/CLI only)
+# video_terms_prompt = ""      # extra rules for search terms / image prompts (API/CLI only)
 # loomloom_candidate_count = 3
 # loomloom_script_duration_seconds = 60
 # loomloom_video_scene_count = 1

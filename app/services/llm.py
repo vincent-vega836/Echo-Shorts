@@ -896,7 +896,9 @@ def generate_terms(
     # "dancing plague mystery") finds nothing in stock libraries, so a caller
     # that supplies its own rules gets plain terms plus those rules instead.
     if video_terms_prompt:
-        subject_rule = "each search term should consist of 1-3 words."
+        # The caller's rules also set the length: stock queries stay short,
+        # text-to-image scene prompts need a full sentence.
+        subject_rule = "follow the length and style rules under Additional Requirements."
         extra_rules = f"\n## Additional Requirements:\n{video_terms_prompt}\n"
     else:
         subject_rule = (

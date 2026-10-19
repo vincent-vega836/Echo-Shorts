@@ -101,6 +101,11 @@ class TestTaskService(unittest.TestCase):
         self.assertEqual(generate.call_args.kwargs["video_terms_prompt"], "concrete scenes only")
         self.assertEqual(generate.call_args.kwargs["amount"], 8)
 
+        params.video_terms_amount = 10
+        with patch.object(tm.llm, "generate_terms", return_value=["street"]) as generate:
+            tm.generate_terms("task-id", params, "script")
+        self.assertEqual(generate.call_args.kwargs["amount"], 10)
+
     def test_generate_final_videos_forwards_clip_speed_and_fit_mode(self):
         """任务编排层必须把画面速度和适配模式传给视频合成服务。"""
         params = VideoParams(

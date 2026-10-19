@@ -16,7 +16,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 7 | Kanca | Şok edici ama doğru iddia (ilk 2 sn) |
 | 8 | Yapı | Video başına tek, derin gerçek |
 | 9 | Altyazı | Kelime kelime vurgulu; alt üçte birlik bölgede (%74), YouTube/TikTok arayüzünün üstünde |
-| 10 | Görüntü | Pixabay (Pexels yeni anahtar vermiyor); Coverr eklenirse dönüşümlü. Arama terimleri stokta bulunan somut sahneler olmalı (özel isim, yıl, soyut kavram yok; `FACTS_TERMS_PROMPT`) |
+| 10 | Görüntü | Her cümleye özel AI görseli (`video_source = "openai_image"`): döneme uygun, fotogerçekçi, sinematik; 4 sn yavaş zoom, video başına en fazla 10 görsel (`FACTS_SCENE_PROMPT`). Pixabay yalnızca yedek: tarih/gizem konularında stok görüntü senaryoya oturmuyor |
 | 11 | Ses | Ücretsiz Edge sesi `en-US-AndrewMultilingualNeural` (sıcak, doğal anlatıcı; dinleyerek seçildi); ElevenLabs istenmedi |
 | 12 | Müzik | Kısık gerilim/ambient |
 | 13 | Saat | Her gün 12:30 New York (= 19:30 İstanbul) |
@@ -27,7 +27,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 18 | Konu seçimi | Mila + trend verisi |
 | 19 | Rapor | Haftalık Cuma raporu |
 | 20 | Ek gelir | Aylık uzun video derlemesi |
-| — | Sıklık / bütçe | Günde 1 Short, ayda ~0 $ (senaryo Claude aboneliğiyle) |
+| — | Sıklık / bütçe | Günde 1 Short; senaryo ve ses 0 $, görüntü OpenAI görsel API (kullanım kadar) |
 
 ## Haftalık akış
 
@@ -51,8 +51,13 @@ gönderilmez, `needs_check` olur: Upload-Post panelinden kontrol edin.
 ```toml
 [app]
 llm_provider = "claude_code"   # senaryolar Claude aboneliğiyle; API anahtarı gerekmez
-video_source = "pixabay"
-pixabay_api_keys = ["..."]
+video_source = "openai_image"   # her cümleye özel AI görseli
+openai_image_base_url = "https://api.openai.com/v1"
+openai_image_api_keys = ["..."]  # platform.openai.com → API keys
+openai_image_model = "gpt-image-1-mini"
+openai_image_quality = "medium"
+openai_image_prompt_template = "Photorealistic cinematic film still, vertical frame. {term}. Dramatic natural light, shallow depth of field, subtle film grain, historically accurate details. No text, no captions, no logos, no watermark."
+pixabay_api_keys = ["..."]       # yedek kaynak
 pixabay_crop_to_fit = true      # Pixabay'da dikey video az; yatay 1080p+ klipleri kırpıp kullanır
 # coverr_api_keys = ["..."]    # isteğe bağlı ikinci görüntü kaynağı
 subtitle_provider = "edge"     # Edge sesi kelime zamanı verir; Whisper gerekmez
@@ -65,7 +70,7 @@ upload_post_youtube_privacy_status = "public"
 
 [slack]
 profile = "facts"
-video_sources = ["pixabay"]    # Coverr eklenirse ["pixabay", "coverr"]
+video_sources = ["openai_image"]
 publish_platforms = ["youtube", "tiktok"]
 queue_path = "storage/shorts/queue.json"
 ```
@@ -113,7 +118,8 @@ yazılırsa senaryo olduğu gibi kullanılır.
 | Kalem | Tahmin |
 | --- | --- |
 | Senaryo (Claude aboneliği, `claude_code`) | 0 $ ek maliyet |
-| Ses (Edge TTS), görüntü (Pixabay), MoneyPrinterTurbo | 0 $ |
+| Ses (Edge TTS), MoneyPrinterTurbo | 0 $ |
+| AI görseller (OpenAI, ~9 görsel/video, ~270/ay) | Model ve kaliteye göre değişir; ilk hafta OpenAI panelinden gerçek tutarı kontrol edin, gerekirse `openai_image_quality = "low"` |
 | Upload-Post | Ücretsiz katman yetmezse ücretli plan |
 
 ## Gerçekçi beklenti ve riskler
