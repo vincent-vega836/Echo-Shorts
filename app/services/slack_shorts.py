@@ -101,7 +101,9 @@ FACTS_SCRIPT_PROMPT = (
     "vivid sentences with a mysterious, curious tone. Use only well-documented "
     "facts, no invented numbers, no exaggeration, no emojis, no hashtags, never "
     "read URLs aloud. The last sentence must lead naturally back into the first "
-    "sentence so the video loops."
+    "sentence so the video loops, yet be a complete sentence on its own: end "
+    "with a period or question mark, never a colon, dash or unfinished clause "
+    "(viewers who do not loop must not feel the video was cut off)."
 )
 
 # Stock libraries index what the camera sees, not what the story means:

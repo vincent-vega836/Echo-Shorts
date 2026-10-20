@@ -20,7 +20,7 @@ def _png(width=1600, height=900, color=(120, 80, 40)):
     return buffer.getvalue()
 
 
-def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="image/jpeg", categories=""):
+def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="image/jpeg", object_name=""):
     return {
         "index": index,
         "title": title,
@@ -34,7 +34,7 @@ def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="
             "extmetadata": {
                 "License": {"value": license_id},
                 "LicenseShortName": {"value": license_id},
-                "Categories": {"value": categories},
+                "ObjectName": {"value": object_name},
             },
         }],
     }
@@ -80,23 +80,30 @@ class FreeImagesTests(unittest.TestCase):
             _commons_page(3, "File:Dancing plague tiny.jpg", width=400, height=300),
             _commons_page(4, "File:Dancing plague.gif", mime="image/gif"),
             _commons_page(5, "File:King David and musicians.jpg"),
-            # Relevance may come from the categories rather than the file name.
-            _commons_page(6, "File:Brueghel.jpg", license_id="pd", categories="Dancing plague of 1518|Pieter Brueghel"),
+            # A crop of a work already shown counts as the same work.
+            _commons_page(6, "File:Dancing plague 1518 detail.jpg"),
+            # Relevance may come from the object name rather than the file name.
+            _commons_page(7, "File:Brueghel.jpg", license_id="pd", object_name="The dancing plague"),
         ])
-        used = {"File:Dancing plague used.jpg"}
+        used = {"File:Dancing plague used.jpg", free_images._work_key("File:Dancing plague 1518.jpg")}
         image, source = free_images.search_commons("dancing plague", used, session=session)
         self.assertEqual(image, b"img")
         self.assertEqual(source["asset_id"], "File:Brueghel.jpg")
-        self.assertEqual(session.downloads, ["https://upload.example/thumb/6.jpg"])
+        self.assertEqual(session.downloads, ["https://upload.example/thumb/7.jpg"])
         self.assertIn("File:Brueghel.jpg", used)
+        self.assertIn(free_images._work_key("File:Brueghel (cropped).jpg"), used)
         # CC0 counts as free, attribution licences do not.
         self.assertTrue(free_images._is_free_license({"License": {"value": "cc0"}}))
         self.assertFalse(free_images._is_free_license({"License": {"value": "cc-by-4.0"}}))
 
     def test_relevance_needs_half_of_the_query_words(self):
         self.assertTrue(free_images._is_relevant("Strasbourg 1518 dance", "File:Danse Strasbourg 1518.jpg", {}))
-        self.assertTrue(free_images._is_relevant("Saint Vitus", "File:Saint-Guy.jpg", {"ImageDescription": {"value": "<b>Vitus</b>"}}))
-        self.assertFalse(free_images._is_relevant("Saint Vitus shrine", "File:Saint Venceslas grave.JPG", {}))
+        self.assertTrue(free_images._is_relevant("Saint Vitus", "File:Saint-Guy.jpg", {"ObjectName": {"value": "<b>Vitus</b>"}}))
+        # Broad descriptions and categories do not count.
+        self.assertFalse(free_images._is_relevant(
+            "Saint Vitus shrine", "File:Saint Venceslas grave.JPG",
+            {"ImageDescription": {"value": "Shrine in St. Vitus Cathedral"}, "Categories": {"value": "Shrines|Saint Vitus"}},
+        ))
         self.assertFalse(free_images._is_relevant("medieval musicians bagpipe drum", "File:King David, wife Musica and musicians.jpg", {}))
         self.assertTrue(free_images._is_relevant("Écorché", "File:Ecorche.jpg", {}))
 

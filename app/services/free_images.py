@@ -54,9 +54,13 @@ DEFAULT_LOCAL_TEMPLATE = (
 # A landscape picture on a portrait canvas fills at least this share of the
 # canvas height; its sides are cropped instead of shrinking it to a thin strip.
 MIN_FILL = 0.6
-# A Commons hit must share at least half of the query's words (in its title,
-# description or categories); the search engine alone returns loose matches.
+# A Commons hit must share at least half of the query's words in its title or
+# object name. The search engine alone returns loose matches, and descriptions
+# and categories are too broad (a grave inside St. Vitus Cathedral is no
+# "Saint Vitus shrine").
 QUERY_STOPWORDS = frozenset({"a", "an", "and", "at", "de", "du", "for", "in", "la", "le", "of", "on", "the", "with"})
+# Words that mark a crop or copy of the same work; a video shows a work once.
+VARIANT_WORDS = frozenset({"crop", "cropped", "detail", "details", "ausschnitt", "file", "jpg", "jpeg", "png", "tif", "tiff"})
 
 
 class FreeImageError(RuntimeError):
@@ -98,12 +102,14 @@ def _is_relevant(query: str, title: str, extmetadata: dict) -> bool:
     wanted = _words(query) - QUERY_STOPWORDS
     if not wanted:
         return True
-    texts = [title] + [
-        str((extmetadata.get(key) or {}).get("value", ""))
-        for key in ("ObjectName", "ImageDescription", "Categories")
-    ]
-    found = _words(" ".join(texts))
+    object_name = str((extmetadata.get("ObjectName") or {}).get("value", ""))
+    found = _words(f"{title} {object_name}")
     return len(wanted & found) * 2 >= len(wanted)
+
+
+def _work_key(title: str) -> str:
+    """Same key for a file and its crops ("... detail.jpg", "... (cropped).jpg")."""
+    return " ".join(sorted(_words(title) - VARIANT_WORDS))
 
 
 def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes, dict] | None:
@@ -118,7 +124,7 @@ def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes,
         "prop": "imageinfo",
         "iiprop": "url|size|mime|extmetadata",
         "iiurlwidth": 1600,
-        "iiextmetadatafilter": "License|LicenseShortName|Artist|ObjectName|ImageDescription|Categories",
+        "iiextmetadatafilter": "License|LicenseShortName|Artist|ObjectName",
     }
     headers = {"User-Agent": USER_AGENT}
     try:
@@ -131,7 +137,7 @@ def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes,
     for page in sorted(pages.values(), key=lambda p: p.get("index", 0)):
         title = page.get("title", "")
         info = (page.get("imageinfo") or [{}])[0]
-        if title in used or info.get("mime") not in ("image/jpeg", "image/png"):
+        if title in used or _work_key(title) in used or info.get("mime") not in ("image/jpeg", "image/png"):
             continue
         if min(int(info.get("width") or 0), int(info.get("height") or 0)) < MIN_SHORT_SIDE:
             continue
@@ -147,7 +153,7 @@ def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes,
                 continue
         except requests.RequestException:
             continue
-        used.add(title)
+        used.update((title, _work_key(title)))
         source = {
             "provider": "wikimedia_commons",
             "asset_id": title,
