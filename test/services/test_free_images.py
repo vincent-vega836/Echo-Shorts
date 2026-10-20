@@ -234,6 +234,37 @@ class FreeImagesTests(unittest.TestCase):
         self.assertEqual(captured["missing"][0].url, "https://stock/candle flame dark")
         self.assertEqual(stock_calls, ["crowd dancing", "candle flame dark"])
 
+    def test_still_pictures_get_alternating_camera_moves(self):
+        from moviepy.video.io.VideoFileClip import VideoFileClip
+
+        from app.services import video
+
+        image = Image.new("RGB", (120, 216))
+        for x in range(120):
+            for y in range(0, 216, 8):
+                image.putpixel((x, y), (x * 2, 255 - x * 2, 90))
+        path = os.path.join(self.tmp, "still.png")
+        image.save(path)
+        for motion in video.IMAGE_MOTIONS:
+            output = video.render_image_zoom_video(path, clip_duration=1, motion=motion)
+            self.assertTrue(output.endswith("-1.mp4"))
+            with VideoFileClip(output) as clip:
+                self.assertEqual(tuple(clip.size), (120, 216))
+                first, last = clip.get_frame(0), clip.get_frame(clip.duration - 0.05)
+            # Every move actually moves the picture.
+            self.assertGreater(abs(first.astype(int) - last.astype(int)).mean(), 1, motion)
+
+        calls = []
+        with patch.object(material, "_render_openai_image_video", side_effect=lambda p, d, **m: calls.append(m) or "clip.mp4"), \
+                patch.object(material, "_persist_material_sources"):
+            material._download_videos_openai_image_on_demand(
+                task_id="t", search_terms=["a", "b", "c"], video_aspect=VideoAspect.portrait,
+                audio_duration=11, max_clip_duration=4, material_directory=self.tmp,
+                generate_images=lambda **kwargs: [SimpleNamespace(url="x.jpg", duration=4, source_info={}, provider="mixed_image")],
+                motions=video.IMAGE_MOTIONS,
+            )
+        self.assertEqual([c["motion"] for c in calls], ["zoom_in", "pan_right", "zoom_out"])
+
     def test_local_clip_needs_no_download(self):
         path = os.path.join(self.tmp, "clip.mp4")
         with open(path, "wb") as f:

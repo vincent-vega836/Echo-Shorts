@@ -1757,14 +1757,14 @@ def generate_images_openai(
     return [item]
 
 
-def _render_openai_image_video(image_path: str, clip_duration: int) -> str:
+def _render_openai_image_video(image_path: str, clip_duration: int, **motion) -> str:
     """
     把生成的图片渲染成 mp4 片段，复用 local 素材的"图片 → 动态片段"管线。
 
     渲染失败返回空字符串，由调用方停止后续付费请求。
     """
     try:
-        return video.render_image_zoom_video(image_path, clip_duration)
+        return video.render_image_zoom_video(image_path, clip_duration, **motion)
     except Exception as e:
         logger.error(
             "failed to render generated image as a video clip: "
@@ -1782,11 +1782,13 @@ def _download_videos_openai_image_on_demand(
     max_clip_duration: int,
     material_directory: str,
     generate_images: Callable[..., List[MaterialInfo]] | None = None,
+    motions: tuple[str, ...] = (),
 ) -> List[str]:
     """
     按脚本片段顺序逐张生成 OpenAI 兼容文生图素材，凑够所需总时长立即停止。
 
-    ``generate_images`` lets a free source (``mixed_image``) reuse this loop.
+    ``generate_images`` lets a free source (``mixed_image``) reuse this loop;
+    ``motions`` cycles camera moves over its pictures.
 
     与 WaveSpeed 按需生成同一付费安全语义：文生图按张计费，先全量生成再
     挑选会为用不到的画面付费。每张图片生成后立即渲染成 mp4 片段并累计
@@ -1829,7 +1831,8 @@ def _download_videos_openai_image_on_demand(
             _persist_material_sources(task_id, material_sources)
             raise
         for item in items:
-            video_file = _render_openai_image_video(item.url, max_clip_duration)
+            motion = {"motion": motions[len(video_paths) % len(motions)]} if motions else {}
+            video_file = _render_openai_image_video(item.url, max_clip_duration, **motion)
             if not video_file:
                 _persist_material_sources(task_id, material_sources)
                 raise OpenAIImagePaidResultError(
@@ -2311,6 +2314,7 @@ def download_videos(
             generate_images=lambda **kwargs: free_images.generate_images_mixed(
                 used=used_titles, **kwargs
             ),
+            motions=video.IMAGE_MOTIONS,
         )
     if source == "openai_image":
         # 与 WaveSpeed 相同的按需付费语义：文生图按张计费，逐段生成、凑够

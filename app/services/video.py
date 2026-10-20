@@ -1832,7 +1832,33 @@ def generate_video(
         return bgm_mix_succeeded
 
 
-def render_image_zoom_video(image_path: str, clip_duration: int = 5) -> str:
+# Camera moves for still pictures; alternating them keeps a run of stills
+# from feeling like one slow slideshow.
+IMAGE_MOTIONS = ("zoom_in", "pan_right", "zoom_out", "pan_left")
+
+
+def _image_motion(clip, clip_duration: int, motion: str):
+    growth = clip_duration * 0.03
+    if motion == "zoom_out":
+        return clip.resized(lambda t: 1 + growth * (1 - t / clip.duration))
+    if motion in ("pan_left", "pan_right"):
+        width, height = clip.size
+        # A pan needs visible travel: at least 20% of the width.
+        scale = 1 + max(growth, 0.2)
+        travel = width * scale - width
+        top = -(height * scale - height) / 2
+
+        def position(t):
+            progress = t / clip.duration
+            if motion == "pan_left":
+                progress = 1 - progress
+            return (-travel * progress, top)
+
+        return clip.resized(scale).with_position(position)
+    return clip.resized(lambda t: 1 + growth * (t / clip.duration))
+
+
+def render_image_zoom_video(image_path: str, clip_duration: int = 5, motion: str = "zoom_in") -> str:
     """
     将单张本地图片渲染为带缓慢放大效果的 mp4 片段，返回输出文件路径。
 
@@ -1850,18 +1876,20 @@ def render_image_zoom_video(image_path: str, clip_duration: int = 5) -> str:
         # The zoom effect starts from the original size and gradually scales up to 120%.
         # t represents the current time, and clip.duration is the total duration of the clip.
         # Note: 1 represents 100% size, so 1.2 represents 120%.
-        zoom_clip = clip.resized(
-            lambda t: 1 + (clip_duration * 0.03) * (t / clip.duration)
-        )
+        # Zoom out uses the same 3%/s scale budget; pans travel further.
+        zoom_clip = _image_motion(clip, clip_duration, motion)
 
         # Optionally, create a composite video clip containing the zoomed clip.
         # This is useful if you want to add other elements to the video.
-        final_clip = CompositeVideoClip([zoom_clip])
+        # The other moves start larger than the frame, so pin the canvas size.
+        canvas = {} if motion == "zoom_in" else {"size": clip.size}
+        final_clip = CompositeVideoClip([zoom_clip], **canvas)
         try:
             # The duration changes the rendered content, so it must be part of
             # the output identity. Different tasks may render the same image
             # concurrently; only publish a complete MP4 after MoviePy closes it.
-            video_file = f"{image_path}.zoom-{clip_duration}.mp4"
+            move = "zoom" if motion == "zoom_in" else motion
+            video_file = f"{image_path}.{move}-{clip_duration}.mp4"
             descriptor, temp_path = tempfile.mkstemp(
                 prefix=".image-zoom-",
                 suffix=".mp4",
