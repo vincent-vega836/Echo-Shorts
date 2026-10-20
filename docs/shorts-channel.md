@@ -16,7 +16,7 @@ araçları anlatır. Kod: `shorts_cli.py` (+ `app/services/shorts_*.py`).
 | 7 | Kanca | Şok edici ama doğru iddia (ilk 2 sn) |
 | 8 | Yapı | Video başına tek, derin gerçek |
 | 9 | Altyazı | Kelime kelime vurgulu; alt üçte birlik bölgede (%74), YouTube/TikTok arayüzünün üstünde |
-| 10 | Görüntü | Ücretsiz karma kaynak (`video_source = "mixed_image"`): her sahne için önce Wikimedia Commons'ta gerçek, kamu malı tarihî görsel (tablo, gravür, fotoğraf); yoksa Mac'te yerel FLUX (mflux) ile fotogerçekçi görsel. 4 sn yavaş zoom, yatay tablolar bulanık arka planlı dikey kadraja oturur. Ücretli alternatif: `openai_image` |
+| 10 | Görüntü | Ücretsiz karma kaynak (`video_source = "mixed_image"`): her sahne için önce Wikimedia Commons'ta gerçek, kamu malı tarihî görsel (tablo, gravür, fotoğraf); yoksa Mac'te yerel FLUX (mflux) ile fotogerçekçi görsel. 4 sn yavaş zoom, yatay tablolar bulanık arka planlı dikey kadraja oturur. Hareketli alternatif: `video_source = "pixabay"`; stok videolar arasına en fazla 2 gerçek arşiv tablosu girer (`archive: <sorgu> :: <stok terimi>` terimi, tablo bulunamazsa stok terimi aranır). Ücretli alternatif: `openai_image` |
 | 11 | Ses | Ücretsiz Edge sesi `en-US-AndrewMultilingualNeural` (sıcak, doğal anlatıcı; dinleyerek seçildi); ElevenLabs istenmedi |
 | 12 | Müzik | Kısık gerilim/ambient |
 | 13 | Saat | Her gün 12:30 New York (= 19:30 İstanbul) |

@@ -32,6 +32,8 @@ COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 # Wikimedia asks API clients to identify themselves.
 USER_AGENT = "EchoShorts/1.0 (https://github.com/vincent-vega836/Echo-Shorts)"
 TERM_SEPARATOR = "::"
+# Marks a stock-video term that should show a real archive picture instead.
+ARCHIVE_PREFIX = "archive:"
 MIN_SHORT_SIDE = 600
 MAX_IMAGE_BYTES = 25 * 1024 * 1024
 CANVAS_SIZES = {

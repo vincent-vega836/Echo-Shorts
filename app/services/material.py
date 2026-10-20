@@ -1174,6 +1174,10 @@ def _describe_download_progress(
 
 
 def save_video(video_url: str, save_dir: str = "") -> str:
+    # Clips rendered on this machine (archive pictures) need no download.
+    if os.path.isfile(video_url):
+        return video_url
+
     if not save_dir:
         save_dir = utils.storage_dir("cache_videos")
 
@@ -2209,6 +2213,25 @@ def download_videos(
             video_aspect=video_aspect,
         )
 
+    # Stock sources may mix in a few real archive pictures: a term
+    # "archive: <query> :: <stock term>" becomes a zoom clip of a free Commons
+    # picture, or a stock search for the fallback term when none is found.
+    stock_search_videos = search_videos
+    used_titles: set[str] = set()
+
+    def search_videos(
+        search_term: str,
+        minimum_duration: int,
+        video_aspect: VideoAspect,
+    ) -> List[MaterialInfo]:
+        if not search_term.lower().startswith(free_images.ARCHIVE_PREFIX):
+            return stock_search_videos(search_term, minimum_duration, video_aspect)
+        query, fallback = free_images.split_term(search_term[len(free_images.ARCHIVE_PREFIX):])
+        items = _archive_clips(query, minimum_duration, video_aspect, used_titles)
+        if items or not fallback or fallback == query:
+            return items
+        return stock_search_videos(fallback, minimum_duration, video_aspect)
+
     material_directory = config.app.get("material_directory", "").strip()
     if material_directory == "task":
         material_directory = utils.task_dir(task_id)
@@ -2400,6 +2423,30 @@ def download_videos(
     logger.success(f"downloaded {len(video_paths)} videos")
     _persist_material_sources(task_id, material_sources)
     return video_paths
+
+
+def _archive_clips(
+    query: str,
+    clip_duration: int,
+    video_aspect: VideoAspect,
+    used_titles: set[str],
+) -> List[MaterialInfo]:
+    """A zoom clip of a free Commons picture for `query`, or [] (no local AI)."""
+    items = free_images.generate_images_mixed(
+        search_term=query,
+        minimum_duration=clip_duration,
+        video_aspect=video_aspect,
+        save_dir=utils.storage_dir("cache_images", create=True),
+        used=used_titles,
+        local=lambda *args, **kwargs: None,
+    )
+    for item in items:
+        try:
+            item.url = video.render_image_zoom_video(item.url, max(int(clip_duration), 1))
+        except Exception as e:
+            logger.error(f"failed to render archive picture: {type(e).__name__}: {e}")
+            return []
+    return items
 
 
 def _download_videos_wavespeed_on_demand(

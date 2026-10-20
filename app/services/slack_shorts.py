@@ -119,7 +119,11 @@ FACTS_TERMS_PROMPT = (
     "years, numbers, events, emotions or abstract ideas (no 'mystery', "
     "'hysteria', 'plague', 'history'). Prefer moody, cinematic, realistic "
     "live-action scenes over animation or cartoons. Every term must look right "
-    "next to the sentence it illustrates."
+    "next to the sentence it illustrates. Exception: for at most two moments "
+    "that a real historical picture shows best (a known painting, engraving or "
+    "document), write 'archive: <2-5 words from its Wikimedia Commons file "
+    "name> :: <stock term>' instead, e.g. 'archive: Brueghel Molenbeek :: crowd "
+    "dancing'; the stock term is used when no picture is found."
 )
 
 # With an AI image source each "term" is a text-to-image prompt, so it can

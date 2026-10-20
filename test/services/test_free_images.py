@@ -196,6 +196,50 @@ class FreeImagesTests(unittest.TestCase):
             generate(search_term="q :: p", minimum_duration=4, video_aspect=VideoAspect.portrait, save_dir="")
         self.assertIsInstance(mixed.call_args.kwargs["used"], set)
 
+    def test_stock_source_mixes_in_archive_pictures(self):
+        stock_calls = []
+
+        def stock(provider, search_videos, search_term, minimum_duration, video_aspect):
+            stock_calls.append(search_term)
+            return [SimpleNamespace(url=f"https://stock/{search_term}")]
+
+        def archive(search_term, used, local, **kwargs):
+            self.assertIsNone(local("prompt", VideoAspect.portrait, self.tmp))  # no local AI here
+            if search_term != "Brueghel Molenbeek":
+                return []
+            item = SimpleNamespace(url=os.path.join(self.tmp, "a.jpg"), provider="mixed_image")
+            return [item]
+
+        captured = {}
+
+        def by_order(**kwargs):
+            search = kwargs["search_videos"]
+            captured["plain"] = search("crowd dancing", 2, VideoAspect.portrait)
+            captured["found"] = search("archive: Brueghel Molenbeek :: crowd dancing", 2, VideoAspect.portrait)
+            captured["missing"] = search("Archive: Hondius 1642 :: candle flame dark", 2, VideoAspect.portrait)
+            return []
+
+        with patch.object(material, "_search_videos_with_cache", side_effect=stock), \
+                patch.object(free_images, "generate_images_mixed", side_effect=archive), \
+                patch.object(material.video, "render_image_zoom_video", return_value="/tmp/a.jpg.zoom-2.mp4"), \
+                patch.object(material, "_download_videos_by_script_order", side_effect=by_order):
+            material.download_videos(
+                task_id="t", search_terms=["x"], source="pixabay",
+                audio_duration=10, max_clip_duration=2, match_script_order=True,
+            )
+
+        self.assertEqual(captured["plain"][0].url, "https://stock/crowd dancing")
+        self.assertEqual(captured["found"][0].url, "/tmp/a.jpg.zoom-2.mp4")
+        # No archive picture: the stock fallback term is searched instead.
+        self.assertEqual(captured["missing"][0].url, "https://stock/candle flame dark")
+        self.assertEqual(stock_calls, ["crowd dancing", "candle flame dark"])
+
+    def test_local_clip_needs_no_download(self):
+        path = os.path.join(self.tmp, "clip.mp4")
+        with open(path, "wb") as f:
+            f.write(b"mp4")
+        self.assertEqual(material.save_video(path), path)
+
 
 if __name__ == "__main__":
     unittest.main()
