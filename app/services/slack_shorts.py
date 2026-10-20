@@ -141,10 +141,14 @@ FACTS_MIXED_PROMPT = (
     "Wikimedia Commons. Use words that appear in Commons file names: place + "
     "year + subject, or artist + place/title of a known work (e.g. 'dancing "
     "plague 1518', 'Strasbourg 1518 dance', 'Brueghel Molenbeek'), not "
-    "descriptive phrases ('Brueghel dancing pilgrims' finds nothing). The image prompt is 12-25 words describing a "
-    "realistic photograph of the same moment: who, doing what, where, era-"
-    "accurate clothing and architecture, light, camera framing; one consistent "
-    "look across terms; no text, logos, gore or likeness of real living people."
+    "descriptive phrases ('Brueghel dancing pilgrims' finds nothing). The image prompt is 15-30 words describing a "
+    "realistic photograph of the same moment. Start it with place and year "
+    "(e.g. 'Strasbourg, 1518:'), then who, doing what, where, light and camera "
+    "framing. Name period clothing, footwear and setting concretely (e.g. "
+    "'linen coif, ankle-length wool kirtle, bare feet, timber-framed houses') "
+    "because the image model drifts to modern fashion otherwise; never modern "
+    "items; one consistent look across terms; no text, logos, gore or likeness "
+    "of real living people."
 )
 
 # Material sources that build a picture per term instead of searching a stock

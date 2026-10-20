@@ -20,7 +20,7 @@ def _png(width=1600, height=900, color=(120, 80, 40)):
     return buffer.getvalue()
 
 
-def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="image/jpeg"):
+def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="image/jpeg", categories=""):
     return {
         "index": index,
         "title": title,
@@ -31,7 +31,11 @@ def _commons_page(index, title, license_id="pd", width=2000, height=1400, mime="
             "width": width,
             "height": height,
             "mime": mime,
-            "extmetadata": {"License": {"value": license_id}, "LicenseShortName": {"value": license_id}},
+            "extmetadata": {
+                "License": {"value": license_id},
+                "LicenseShortName": {"value": license_id},
+                "Categories": {"value": categories},
+            },
         }],
     }
 
@@ -71,21 +75,30 @@ class FreeImagesTests(unittest.TestCase):
 
     def test_commons_takes_first_free_large_unused_picture(self):
         session = FakeSession([
-            _commons_page(1, "File:Used.jpg"),
-            _commons_page(2, "File:Licensed.jpg", license_id="cc-by-sa-4.0"),
-            _commons_page(3, "File:Tiny.jpg", width=400, height=300),
-            _commons_page(4, "File:Animated.gif", mime="image/gif"),
-            _commons_page(5, "File:Brueghel.jpg", license_id="pd"),
+            _commons_page(1, "File:Dancing plague used.jpg"),
+            _commons_page(2, "File:Dancing plague licensed.jpg", license_id="cc-by-sa-4.0"),
+            _commons_page(3, "File:Dancing plague tiny.jpg", width=400, height=300),
+            _commons_page(4, "File:Dancing plague.gif", mime="image/gif"),
+            _commons_page(5, "File:King David and musicians.jpg"),
+            # Relevance may come from the categories rather than the file name.
+            _commons_page(6, "File:Brueghel.jpg", license_id="pd", categories="Dancing plague of 1518|Pieter Brueghel"),
         ])
-        used = {"File:Used.jpg"}
+        used = {"File:Dancing plague used.jpg"}
         image, source = free_images.search_commons("dancing plague", used, session=session)
         self.assertEqual(image, b"img")
         self.assertEqual(source["asset_id"], "File:Brueghel.jpg")
-        self.assertEqual(session.downloads, ["https://upload.example/thumb/5.jpg"])
+        self.assertEqual(session.downloads, ["https://upload.example/thumb/6.jpg"])
         self.assertIn("File:Brueghel.jpg", used)
         # CC0 counts as free, attribution licences do not.
         self.assertTrue(free_images._is_free_license({"License": {"value": "cc0"}}))
         self.assertFalse(free_images._is_free_license({"License": {"value": "cc-by-4.0"}}))
+
+    def test_relevance_needs_half_of_the_query_words(self):
+        self.assertTrue(free_images._is_relevant("Strasbourg 1518 dance", "File:Danse Strasbourg 1518.jpg", {}))
+        self.assertTrue(free_images._is_relevant("Saint Vitus", "File:Saint-Guy.jpg", {"ImageDescription": {"value": "<b>Vitus</b>"}}))
+        self.assertFalse(free_images._is_relevant("Saint Vitus shrine", "File:Saint Venceslas grave.JPG", {}))
+        self.assertFalse(free_images._is_relevant("medieval musicians bagpipe drum", "File:King David, wife Musica and musicians.jpg", {}))
+        self.assertTrue(free_images._is_relevant("Écorché", "File:Ecorche.jpg", {}))
 
     def test_commons_returns_none_without_a_free_match(self):
         session = FakeSession([_commons_page(1, "File:A.jpg", license_id="cc-by-4.0")])
@@ -120,12 +133,17 @@ class FreeImagesTests(unittest.TestCase):
         failed = lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "boom")  # noqa: E731
         self.assertIsNone(free_images.generate_local("x", VideoAspect.portrait, self.tmp, run=failed))
 
-    def test_landscape_painting_is_framed_whole_on_portrait_canvas(self):
+    def test_landscape_painting_fills_most_of_the_portrait_canvas(self):
         canvas = free_images.frame_for_canvas(_png(1600, 900), VideoAspect.portrait)
         self.assertEqual(canvas.size, (1080, 1920))
-        # Centre shows the painting itself, top edge the darker blurred fill.
+        # The painting covers 60% of the height (sides cropped) instead of a
+        # thin strip; the top edge shows the darker blurred fill.
         self.assertEqual(canvas.getpixel((540, 960)), (120, 80, 40))
+        self.assertEqual(canvas.getpixel((540, 960 - 560)), (120, 80, 40))
         self.assertLess(sum(canvas.getpixel((540, 20))), sum((120, 80, 40)))
+        # A portrait picture is never cropped: it is fitted whole.
+        tall = free_images.frame_for_canvas(_png(900, 1600), VideoAspect.portrait)
+        self.assertEqual(tall.getpixel((5, 960)), (120, 80, 40))
         with self.assertRaises(free_images.FreeImageError):
             free_images.frame_for_canvas(b"not an image", VideoAspect.portrait)
 

@@ -14,8 +14,10 @@ from __future__ import annotations
 import io
 import os
 import random
+import re
 import shlex
 import subprocess
+import unicodedata
 import uuid
 from typing import Callable, List
 
@@ -44,9 +46,17 @@ LOCAL_SIZES = {
     VideoAspect.square: (1024, 1024),
 }
 DEFAULT_LOCAL_TEMPLATE = (
-    "Photorealistic cinematic film still. {term}. Dramatic natural light, "
-    "shallow depth of field, subtle film grain. No text, no watermark."
+    "Photorealistic historical drama film still, period-accurate costumes, "
+    "props and architecture. {term}. Dramatic natural light, shallow depth "
+    "of field, subtle film grain. No modern clothing, shoes or objects, no "
+    "text, no watermark."
 )
+# A landscape picture on a portrait canvas fills at least this share of the
+# canvas height; its sides are cropped instead of shrinking it to a thin strip.
+MIN_FILL = 0.6
+# A Commons hit must share at least half of the query's words (in its title,
+# description or categories); the search engine alone returns loose matches.
+QUERY_STOPWORDS = frozenset({"a", "an", "and", "at", "de", "du", "for", "in", "la", "le", "of", "on", "the", "with"})
 
 
 class FreeImageError(RuntimeError):
@@ -78,6 +88,24 @@ def _is_free_license(extmetadata: dict) -> bool:
     )
 
 
+def _words(text: str) -> set[str]:
+    text = unicodedata.normalize("NFKD", re.sub(r"<[^>]+>", " ", text))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+    return set(re.findall(r"[a-z0-9]+", text))
+
+
+def _is_relevant(query: str, title: str, extmetadata: dict) -> bool:
+    wanted = _words(query) - QUERY_STOPWORDS
+    if not wanted:
+        return True
+    texts = [title] + [
+        str((extmetadata.get(key) or {}).get("value", ""))
+        for key in ("ObjectName", "ImageDescription", "Categories")
+    ]
+    found = _words(" ".join(texts))
+    return len(wanted & found) * 2 >= len(wanted)
+
+
 def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes, dict] | None:
     """Return (image bytes, source info) for the best free Commons match."""
     params = {
@@ -90,7 +118,7 @@ def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes,
         "prop": "imageinfo",
         "iiprop": "url|size|mime|extmetadata",
         "iiurlwidth": 1600,
-        "iiextmetadatafilter": "License|LicenseShortName|Artist",
+        "iiextmetadatafilter": "License|LicenseShortName|Artist|ObjectName|ImageDescription|Categories",
     }
     headers = {"User-Agent": USER_AGENT}
     try:
@@ -107,7 +135,8 @@ def search_commons(query: str, used: set[str], session=requests) -> tuple[bytes,
             continue
         if min(int(info.get("width") or 0), int(info.get("height") or 0)) < MIN_SHORT_SIDE:
             continue
-        if not _is_free_license(info.get("extmetadata") or {}):
+        extmetadata = info.get("extmetadata") or {}
+        if not _is_free_license(extmetadata) or not _is_relevant(query, title, extmetadata):
             continue
         url = info.get("thumburl") or info.get("url")
         if not url:
@@ -185,7 +214,15 @@ def frame_for_canvas(image_bytes: bytes, aspect: VideoAspect) -> Image.Image:
     background = ImageEnhance.Brightness(background.filter(ImageFilter.GaussianBlur(40))).enhance(0.55)
 
     fit = min(width / picture.width, height / picture.height)
-    front = picture.resize((round(picture.width * fit), round(picture.height * fit)))
+    if picture.width / picture.height > width / height:
+        fill = MIN_FILL * height / picture.height
+    else:
+        fill = MIN_FILL * width / picture.width
+    front_scale = max(fit, min(scale, fill))
+    front = picture.resize((round(picture.width * front_scale), round(picture.height * front_scale)))
+    left = max(0, (front.width - width) // 2)
+    top = max(0, (front.height - height) // 2)
+    front = front.crop((left, top, left + min(width, front.width), top + min(height, front.height)))
     background.paste(front, ((width - front.width) // 2, (height - front.height) // 2))
     return background
 
