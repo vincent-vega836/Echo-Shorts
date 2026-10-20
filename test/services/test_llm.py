@@ -247,6 +247,36 @@ class TestScriptPromptOptions(unittest.TestCase):
         self.assertIn("chronological stock-video search terms", captured["prompt"])
         self.assertIn("same order as the script narration", captured["prompt"])
 
+    def test_generate_terms_prompt_overrides_subject_stamping(self):
+        """
+        A caller's own term rules replace the "always add the main subject"
+        constraint; otherwise every term carries a proper noun that stock
+        libraries cannot match.
+        """
+        captured = {}
+
+        def fake_generate_response(prompt):
+            captured["prompt"] = prompt
+            return '["cobblestone street", "crowd dancing"]'
+
+        with patch.object(llm, "_generate_response", side_effect=fake_generate_response):
+            result = llm.generate_terms(
+                video_subject="Dancing plague of 1518",
+                video_script="They danced for days.",
+                amount=2,
+                video_terms_prompt="No proper nouns; concrete filmable scenes only.",
+            )
+
+        self.assertEqual(result, ["cobblestone street", "crowd dancing"])
+        self.assertIn("## Additional Requirements:", captured["prompt"])
+        self.assertIn("No proper nouns; concrete filmable scenes only.", captured["prompt"])
+        self.assertNotIn("always add the main subject", captured["prompt"])
+
+        with patch.object(llm, "_generate_response", side_effect=fake_generate_response):
+            llm.generate_terms(video_subject="x", video_script="y", amount=2)
+        self.assertIn("always add the main subject", captured["prompt"])
+        self.assertNotIn("## Additional Requirements:", captured["prompt"])
+
     def test_generate_terms_returns_empty_list_on_provider_error(self):
         """
         Provider 错误必须保持 generate_terms 的 List[str] 返回契约。

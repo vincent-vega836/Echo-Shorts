@@ -580,6 +580,92 @@ class TestMaterialTlsVerification(unittest.TestCase):
             ["https://example.com/coverr-landscape.mp4"],
         )
 
+    def _pixabay_mixed_response(self):
+        def hit(asset_id, width, height):
+            return {
+                "id": asset_id,
+                "duration": 8,
+                "videos": {
+                    "large": {
+                        "width": width,
+                        "height": height,
+                        "url": f"https://example.com/{asset_id}-large.mp4",
+                    },
+                    "small": {
+                        "width": width // 2,
+                        "height": height // 2,
+                        "url": f"https://example.com/{asset_id}-small.mp4",
+                    },
+                },
+            }
+
+        return SimpleNamespace(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            text="",
+            json=lambda: {
+                "hits": [
+                    hit("wide", 1920, 1080),
+                    hit("tall", 1080, 1920),
+                    hit("lowres", 1280, 720),
+                ]
+            },
+        )
+
+    def test_pixabay_crop_to_fit_adds_wide_clips_after_native_ones(self):
+        """
+        Pixabay has no orientation filter and few vertical clips. With
+        pixabay_crop_to_fit, a portrait search also takes landscape clips whose
+        height covers the canvas (largest rendition), after the native ones.
+        """
+        config.app["pixabay_api_keys"] = ["pixabay-key"]
+        config.app["pixabay_crop_to_fit"] = True
+        config.proxy.clear()
+
+        with patch(
+            "app.services.material.requests.get",
+            return_value=self._pixabay_mixed_response(),
+        ):
+            results = material.search_videos_pixabay("city", minimum_duration=1)
+
+        self.assertEqual(
+            [item.url for item in results],
+            ["https://example.com/tall-large.mp4", "https://example.com/wide-large.mp4"],
+        )
+        self.assertNotIn("crop_to_fit", results[0].source_info["rendition"])
+        self.assertTrue(results[1].source_info["rendition"]["crop_to_fit"])
+        # Cached cropped clips stay usable while the option is on, and are
+        # dropped again once it is turned off.
+        self.assertEqual(
+            len(material._filter_materials_by_aspect(results, material.VideoAspect.portrait)),
+            2,
+        )
+        config.app["pixabay_crop_to_fit"] = False
+        self.assertEqual(
+            [
+                item.url
+                for item in material._filter_materials_by_aspect(
+                    results, material.VideoAspect.portrait
+                )
+            ],
+            ["https://example.com/tall-large.mp4"],
+        )
+
+    def test_pixabay_without_crop_to_fit_keeps_strict_orientation(self):
+        config.app["pixabay_api_keys"] = ["pixabay-key"]
+        config.app.pop("pixabay_crop_to_fit", None)
+        config.proxy.clear()
+
+        with patch(
+            "app.services.material.requests.get",
+            return_value=self._pixabay_mixed_response(),
+        ):
+            results = material.search_videos_pixabay("city", minimum_duration=1)
+
+        self.assertEqual(
+            [item.url for item in results], ["https://example.com/tall-large.mp4"]
+        )
+
     def test_search_pixabay_does_not_log_api_key(self):
         config.app["pixabay_api_keys"] = ["pixabay-secret-key"]
         config.proxy.clear()

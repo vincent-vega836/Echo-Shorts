@@ -619,6 +619,9 @@ chatterbox = _SynchronizedConfig(_cfg.get("chatterbox", {}))
 kokoro = _SynchronizedConfig(_cfg.get("kokoro", {}))
 fish_audio = _SynchronizedConfig(_cfg.get("fish_audio", {}))
 voxcpm = _SynchronizedConfig(_cfg.get("voxcpm", {}))
+# Read only by slack_bot.py; the WebUI never edits it, so save_config keeps it
+# through the dict(_cfg) copy.
+slack = _cfg.get("slack", {})
 ui = _SynchronizedConfig(
     _cfg.get(
         "ui",

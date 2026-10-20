@@ -22,3 +22,20 @@ services:
     command: [ "python3", "main.py" ]
     volumes: *common-volumes
     restart: always
+  slack:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_SLACK: "1"
+    container_name: "moneyprinterturbo-slack"
+    command: [ "python3", "slack_bot.py" ]
+    environment:
+      - SLACK_MPT_API_URL=http://api:8080
+      - SLACK_BOT_TOKEN
+      - SLACK_APP_TOKEN
+    depends_on:
+      - api
+    volumes: *common-volumes
+    restart: unless-stopped
+    profiles: [ "slack" ]

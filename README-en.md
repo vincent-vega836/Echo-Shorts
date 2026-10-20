@@ -587,3 +587,7 @@ Click to view the [`LICENSE`](LICENSE) file
 ### Editable local video projects
 
 Use [revision-aware local projects](docs/video-projects.md) to replace prepared scene media, compare revisions and rebuild only affected stages. The opt-in CLI preserves verified artifacts and the last successful export; it makes no provider calls or automatic posts.
+
+### Run a Shorts channel from an agent
+
+[`shorts_cli.py`](docs/shorts-channel.md) renders Shorts with a channel profile (e.g. an English "facts" channel), queues a week of them for human approval, publishes approved ones on schedule to YouTube/TikTok via Upload-Post, and compiles monthly long-form videos.

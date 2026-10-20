@@ -858,8 +858,12 @@ def generate_terms(
     amount: int = 5,
     match_script_order: bool = False,
     app_config=None,
+    video_terms_prompt: str = "",
 ) -> List[str]:
     video_script = utils.remove_pause_tags(video_script or "").strip()
+    video_terms_prompt = _limit_script_text(
+        video_terms_prompt, MAX_SCRIPT_PROMPT_LENGTH, "video_terms_prompt"
+    )
     if match_script_order:
         goal = (
             f"Generate {amount} chronological stock-video search terms that follow "
@@ -888,6 +892,21 @@ def generate_terms(
             '"search term 4", "search term 5"]'
         )
 
+    # Stamping the subject onto every term ("medieval Strasbourg street",
+    # "dancing plague mystery") finds nothing in stock libraries, so a caller
+    # that supplies its own rules gets plain terms plus those rules instead.
+    if video_terms_prompt:
+        # The caller's rules also set the length: stock queries stay short,
+        # text-to-image scene prompts need a full sentence.
+        subject_rule = "follow the length and style rules under Additional Requirements."
+        extra_rules = f"\n## Additional Requirements:\n{video_terms_prompt}\n"
+    else:
+        subject_rule = (
+            "each search term should consist of 1-3 words, always add the main "
+            "subject of the video."
+        )
+        extra_rules = ""
+
     prompt = f"""
 # Role: Video Search Terms Generator
 
@@ -896,12 +915,12 @@ def generate_terms(
 
 ## Constrains:
 1. the search terms are to be returned as a json-array of strings.
-2. each search term should consist of 1-3 words, always add the main subject of the video.
+2. {subject_rule}
 3. you must only return the json-array of strings. you must not return anything else. you must not return the script.
 4. the search terms must be related to the subject of the video.
 5. reply with english search terms only.
 {ordering_rule}
-
+{extra_rules}
 ## Output Example:
 {output_example}
 

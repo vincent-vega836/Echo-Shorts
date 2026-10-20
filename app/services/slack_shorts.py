@@ -1,0 +1,564 @@
+"""Slack -> MoneyPrinterTurbo bridge logic for YouTube Shorts production.
+
+This module holds everything the Slack bot needs that does not depend on the
+Slack SDK: parsing a request message, turning it into a /api/v1/videos payload
+with the brand preset applied, talking to the MPT API, and suggesting posting
+slots. Keeping it SDK-free lets it be unit-tested without slack_bolt installed.
+
+Request format (slash command, @mention, or a message from an allowed agent
+such as Mila):
+
+    short: Yazılım projelerinde sakin planlama
+    dil: tr
+    ses: erkek
+    adet: 2
+    ---
+    Optional ready-made script. When present, the LLM script step is skipped
+    and this text is narrated as-is.
+
+Header options may also be written inline, e.g. ``/short dil:en Calm releases``.
+"""
+
+from __future__ import annotations
+
+import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import Any, Callable, Iterable
+from urllib.parse import unquote, urlparse
+from zoneinfo import ZoneInfo
+
+import requests
+
+TASK_STATE_FAILED = -1
+TASK_STATE_COMPLETE = 1
+
+# "short:" / "shorts:" (agent messages) or a literal "/short" word. The colon or
+# word boundary is required so subjects such as "Shortcut tips" stay intact.
+TRIGGER_PATTERN = re.compile(r"^\s*(?:/short\b|shorts?\s*:)\s*", re.IGNORECASE)
+AGENT_TRIGGER_PATTERN = re.compile(r"^\s*shorts?\s*:", re.IGNORECASE)
+MENTION_PATTERN = re.compile(r"<@[A-Z0-9]+(?:\|[^>]*)?>")
+OPTION_PATTERN = re.compile(
+    r"(?<!\S)(dil|lang|ses|voice|adet|count|format|aspect|kaynak|source|ref)\s*:\s*(\S+)",
+    re.IGNORECASE,
+)
+MAX_REFERENCES = 5
+
+MAX_SUBJECT_LENGTH = 200
+MAX_SCRIPT_LENGTH = 5000
+# Slack rejects uploads above 1 GB; stop downloading before that.
+MAX_VIDEO_BYTES = 1024 * 1024 * 1024
+
+# Edge TTS voices per language. Each brand language gets one female and one
+# male voice so requests can say "ses: erkek" without knowing voice IDs.
+VOICES = {
+    "tr": {"female": "tr-TR-EmelNeural-Female", "male": "tr-TR-AhmetNeural-Male"},
+    "en": {"female": "en-US-AvaNeural-Female", "male": "en-US-AndrewNeural-Male"},
+    "de": {"female": "de-DE-KatjaNeural-Female", "male": "de-DE-ConradNeural-Male"},
+}
+
+_LANGUAGE_ALIASES = {
+    "tr": "tr", "turkce": "tr", "türkçe": "tr", "turkish": "tr",
+    "en": "en", "ingilizce": "en", "english": "en",
+    "de": "de", "almanca": "de", "german": "de", "deutsch": "de",
+}
+_GENDER_ALIASES = {
+    "kadin": "female", "kadın": "female", "female": "female", "k": "female",
+    "erkek": "male", "male": "male", "e": "male",
+}
+_ASPECT_ALIASES = {
+    "dikey": "9:16", "shorts": "9:16", "9:16": "9:16", "portrait": "9:16",
+    "yatay": "16:9", "16:9": "16:9", "landscape": "16:9",
+    "kare": "1:1", "1:1": "1:1", "square": "1:1",
+}
+_OPTION_KEYS = {
+    "dil": "language", "lang": "language",
+    "ses": "voice", "voice": "voice",
+    "adet": "count", "count": "count",
+    "format": "aspect", "aspect": "aspect",
+    "kaynak": "source", "source": "source",
+    "ref": "reference",
+}
+
+# ECHO brand voice: calm, orderly, careful. Passed to the LLM as extra script
+# requirements so generated scripts match the tone used on madebyecho.xyz.
+ECHO_SCRIPT_PROMPT = (
+    "Write for a YouTube Shorts video under 45 seconds. Open with a one-sentence "
+    "hook in the first 2 seconds. Tone: calm, orderly, careful and plain; no hype, "
+    "no exaggerated claims, no emojis. Short sentences that read well as subtitles. "
+    "End with a single quiet call to action mentioning madebyecho.xyz."
+)
+
+DEFAULT_POSTING_SLOTS = ("12:30", "19:00", "21:00")
+
+# "facts" channel: English, mysterious one-fact Shorts for a US/global audience.
+FACTS_SCRIPT_PROMPT = (
+    "Write a 20-35 second YouTube Short (60-85 words) about ONE surprising, true "
+    "fact. Sentence one is the hook: a shocking but accurate claim of at most 12 "
+    "words that states the strangest part of the fact outright; no scene-setting, "
+    "no dates first, no 'Did you know'. Then explain why it is true in short, "
+    "vivid sentences with a mysterious, curious tone. Use only well-documented "
+    "facts, no invented numbers, no exaggeration, no emojis, no hashtags, never "
+    "read URLs aloud. The last sentence must lead naturally back into the first "
+    "sentence so the video loops, yet be a complete sentence on its own: end "
+    "with a period or question mark, never a colon, dash or unfinished clause "
+    "(viewers who do not loop must not feel the video was cut off)."
+)
+
+# Stock libraries index what the camera sees, not what the story means:
+# "medieval Strasbourg street" or "dancing plague mystery" return nothing on
+# Pixabay, while "cobblestone street night" and "crowd dancing" do.
+FACTS_TERMS_PROMPT = (
+    "Each term names a concrete, filmable scene that a stock-footage library "
+    "(Pixabay, Pexels) certainly has: a person, crowd, place, object, animal, "
+    "weather or light, e.g. 'cobblestone street night', 'crowd dancing', "
+    "'exhausted man lying', 'candle flame dark', 'old town square', 'fog forest'. "
+    "Each term is 2-4 words. Use common English nouns only: no proper nouns, "
+    "place or people names, "
+    "years, numbers, events, emotions or abstract ideas (no 'mystery', "
+    "'hysteria', 'plague', 'history'). Prefer moody, cinematic, realistic "
+    "live-action scenes over animation or cartoons. Every term must look right "
+    "next to the sentence it illustrates. Exception: for at most two moments "
+    "that a real historical picture shows best (a known painting, engraving or "
+    "document), write 'archive: <2-5 words from its Wikimedia Commons file "
+    "name> :: <stock term>' instead, e.g. 'archive: Brueghel Molenbeek :: crowd "
+    "dancing'; the stock term is used when no picture is found."
+)
+
+# With an AI image source each "term" is a text-to-image prompt, so it can
+# show exactly what the narration says, era and place included.
+FACTS_SCENE_PROMPT = (
+    "Each term is a text-to-image prompt of 12-25 words for ONE moment of the "
+    "narration, in script order, so every image matches the sentence spoken "
+    "over it. Describe a realistic photograph: who, doing what, where, era-"
+    "accurate clothing and architecture, time of day, light, camera framing "
+    "(close-up, wide shot, low angle). Keep one consistent look across all "
+    "terms. Concrete and visual only: no text, signs, captions or logos in "
+    "the scene, no gore, no likeness of real living people, no abstract ideas."
+)
+
+# Free source: a real public-domain picture from Wikimedia Commons when one
+# exists, a locally generated one otherwise. Each term carries both halves.
+FACTS_MIXED_PROMPT = (
+    "Each term illustrates ONE moment of the narration, in script order, and "
+    "has the form '<archive query> :: <image prompt>'. The archive query is "
+    "2-5 words to find a real historical picture of exactly that moment on "
+    "Wikimedia Commons. Use words that appear in Commons file names: place + "
+    "year + subject, or artist + place/title of a known work (e.g. 'dancing "
+    "plague 1518', 'Strasbourg 1518 dance', 'Brueghel Molenbeek'), not "
+    "descriptive phrases ('Brueghel dancing pilgrims' finds nothing). The image prompt is 15-30 words describing a "
+    "realistic photograph of the same moment. Start it with place and year "
+    "(e.g. 'Strasbourg, 1518:'), then who, doing what, where, light and camera "
+    "framing. Name period clothing, footwear and setting concretely (e.g. "
+    "'linen coif, ankle-length wool kirtle, bare feet, timber-framed houses') "
+    "because the image model drifts to modern fashion otherwise; never modern "
+    "items; one consistent look across terms; no text, logos, gore or likeness "
+    "of real living people."
+)
+
+# Material sources that build a picture per term instead of searching a stock
+# video library; they get scene-style terms and slower cuts.
+IMAGE_SOURCES = frozenset({"openai_image", "mixed_image"})
+
+# Subtitle baseline as a percentage of the frame height. ~74% sits in the
+# lower third yet clear of the YouTube Shorts title/channel overlay and the
+# TikTok caption area, which cover roughly the bottom 20% of the screen.
+SUBTITLE_POSITION_PERCENT = 74.0
+
+
+@dataclass(frozen=True)
+class Profile:
+    """Channel-wide defaults applied to every request rendered for it."""
+
+    name: str
+    language: str
+    gender: str
+    script_prompt: str
+    timezone: str
+    posting_slots: tuple[str, ...]
+    subtitle_display_mode: str = "sentence"
+    subtitle_animation: str = "none"
+    font_size: int = 64
+    stroke_width: float = 2.0
+    clip_duration: int = 3
+    bgm_volume: float = 0.15
+    signature: str = ""
+    hashtags: tuple[str, ...] = ()
+    # Free Edge voice for the profile's own language and gender; empty uses VOICES.
+    voice: str = ""
+    # Extra rules for the stock-footage search terms; empty keeps the API default.
+    terms_prompt: str = ""
+    # Rules, seconds per image and image count when the source is an AI image
+    # generator; one image per term, so terms x seconds must cover the narration.
+    scene_prompt: str = ""
+    mixed_scene_prompt: str = ""
+    image_clip_duration: int = 4
+    image_count: int = 10
+
+
+PROFILES = {
+    "echo": Profile(
+        name="echo",
+        language="tr",
+        gender="female",
+        script_prompt=ECHO_SCRIPT_PROMPT,
+        timezone="Europe/Istanbul",
+        posting_slots=DEFAULT_POSTING_SLOTS,
+        signature="madebyecho.xyz",
+        hashtags=("shorts", "echo"),
+    ),
+    "facts": Profile(
+        name="facts",
+        language="en",
+        gender="male",
+        script_prompt=FACTS_SCRIPT_PROMPT,
+        terms_prompt=FACTS_TERMS_PROMPT,
+        scene_prompt=FACTS_SCENE_PROMPT,
+        mixed_scene_prompt=FACTS_MIXED_PROMPT,
+        # 12:30 New York = 19:30 Istanbul: US lunch break and European evening.
+        timezone="America/New_York",
+        posting_slots=("12:30",),
+        subtitle_display_mode="word_by_word",
+        subtitle_animation="pop_spring",
+        font_size=76,
+        stroke_width=3.0,
+        clip_duration=2,
+        bgm_volume=0.12,
+        hashtags=("shorts", "facts", "mystery"),
+        # Warm, natural storyteller (chosen by ear over ChristopherNeural);
+        # free and returns word timings, so word-by-word subtitles stay in
+        # sync without Whisper.
+        voice="en-US-AndrewMultilingualNeural-Male",
+    ),
+}
+
+
+def get_profile(name: str | None) -> Profile:
+    try:
+        return PROFILES[(name or "echo").lower()]
+    except KeyError:
+        raise ValueError(f"unknown profile {name!r}; choose one of {sorted(PROFILES)}") from None
+
+
+class ShortRequestError(ValueError):
+    """Raised when a Slack message cannot be turned into a video request."""
+
+
+@dataclass
+class ShortRequest:
+    subject: str
+    script: str = ""
+    language: str = "tr"
+    gender: str = "female"
+    count: int = 1
+    aspect: str = "9:16"
+    source: str = ""
+    references: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def parse_request(
+    text: str, default_language: str = "tr", default_gender: str = "female"
+) -> ShortRequest:
+    """Parse a Slack message body into a ShortRequest."""
+    text = MENTION_PATTERN.sub("", text or "").strip()
+    text = TRIGGER_PATTERN.sub("", text, count=1)
+
+    header, script = text, ""
+    parts = re.split(r"^\s*---\s*$", text, maxsplit=1, flags=re.MULTILINE)
+    if len(parts) == 2:
+        header, script = parts[0], parts[1].strip()
+
+    request = ShortRequest(subject="", language=default_language, gender=default_gender)
+    subject_lines = []
+    for line in header.splitlines():
+        for raw_key, raw_value in OPTION_PATTERN.findall(line):
+            _apply_option(request, _OPTION_KEYS[raw_key.lower()], raw_value)
+        remainder = OPTION_PATTERN.sub("", line).strip()
+        if remainder:
+            subject_lines.append(remainder)
+
+    request.subject = " ".join(subject_lines).strip()[:MAX_SUBJECT_LENGTH]
+    if len(script) > MAX_SCRIPT_LENGTH:
+        request.warnings.append(f"Senaryo {MAX_SCRIPT_LENGTH} karaktere kısaltıldı.")
+        script = script[:MAX_SCRIPT_LENGTH]
+    request.script = script
+    if not request.subject and request.script:
+        request.subject = request.script.splitlines()[0][:MAX_SUBJECT_LENGTH]
+    if not request.subject:
+        raise ShortRequestError(
+            "Konu bulunamadı. Örnek: `/short Sakin yazılım planlaması dil:tr`"
+        )
+    return request
+
+
+def _apply_option(request: ShortRequest, key: str, raw_value: str) -> None:
+    value = raw_value.strip().lower()
+    if key == "language":
+        if value in _LANGUAGE_ALIASES:
+            request.language = _LANGUAGE_ALIASES[value]
+        else:
+            request.warnings.append(f"Bilinmeyen dil `{raw_value}`, varsayılan kullanıldı.")
+    elif key == "voice":
+        if value in _GENDER_ALIASES:
+            request.gender = _GENDER_ALIASES[value]
+        else:
+            request.warnings.append(f"Bilinmeyen ses `{raw_value}`, kadın sesi kullanıldı.")
+    elif key == "count":
+        try:
+            request.count = min(max(int(value), 1), 5)
+        except ValueError:
+            request.warnings.append(f"Geçersiz adet `{raw_value}`, 1 kullanıldı.")
+    elif key == "aspect":
+        if value in _ASPECT_ALIASES:
+            request.aspect = _ASPECT_ALIASES[value]
+        else:
+            request.warnings.append(f"Bilinmeyen format `{raw_value}`, 9:16 kullanıldı.")
+    elif key == "source":
+        request.source = value
+    elif key == "reference":
+        url = raw_value.strip().rstrip(".,;")
+        if not re.match(r"^https?://[^\s/]+\.[^\s]+$", url):
+            request.warnings.append(f"Geçersiz kaynak linki `{raw_value}` atlandı.")
+        elif len(request.references) >= MAX_REFERENCES:
+            request.warnings.append(f"En fazla {MAX_REFERENCES} kaynak linki eklenir.")
+        elif url not in request.references:
+            request.references.append(url)
+
+
+def build_video_payload(request: ShortRequest, settings: dict | None = None) -> dict:
+    """Build the JSON body for POST /api/v1/videos with the channel preset.
+
+    `settings` may name a `profile` ("echo" or "facts") and override
+    `font_name`, `video_source`, `script_prompt` and `elevenlabs_voice`.
+    """
+    settings = settings or {}
+    profile = get_profile(settings.get("profile"))
+    voices = VOICES.get(request.language, VOICES["tr"])
+    voice = voices[request.gender]
+    own_voice = request.language == profile.language and request.gender == profile.gender
+    if own_voice and profile.voice:
+        voice = profile.voice
+    # A configured ElevenLabs voice ("elevenlabs:<id>:<name>") replaces the
+    # free Edge voice for the profile's own language and gender only, so a
+    # one-off "dil:tr" request does not get an English narrator.
+    elevenlabs_voice = settings.get("elevenlabs_voice", "")
+    if elevenlabs_voice and own_voice:
+        voice = elevenlabs_voice
+    payload: dict[str, Any] = {
+        "video_subject": request.subject,
+        "video_script": request.script,
+        "video_language": request.language,
+        "video_aspect": request.aspect,
+        "video_count": request.count,
+        "video_clip_duration": profile.clip_duration,
+        "voice_name": voice,
+        "voice_rate": 1.05,
+        "bgm_type": "random",
+        "bgm_volume": profile.bgm_volume,
+        "subtitle_enabled": True,
+        "subtitle_position": "custom",
+        "custom_position": SUBTITLE_POSITION_PERCENT,
+        "subtitle_display_mode": profile.subtitle_display_mode,
+        "subtitle_animation": profile.subtitle_animation,
+        # BeVietnamPro covers Latin Extended (ğ, ş, ı, İ, ä, ö, ü, ß) unlike
+        # the CJK default font, so Turkish and German subtitles render fully.
+        "font_name": settings.get("font_name", "BeVietnamPro-Bold.ttf"),
+        "font_size": profile.font_size,
+        "stroke_width": profile.stroke_width,
+        "match_materials_to_script": True,
+    }
+    # The API falls back to Pexels when no source is sent, so an explicit
+    # configured source (or the first rotated one) must always be passed.
+    rotation = [src for src in settings.get("video_sources", "").split(",") if src]
+    source = request.source or settings.get("video_source", "") or (rotation[0] if rotation else "")
+    if source:
+        payload["video_source"] = source
+    if not request.script:
+        payload["video_script_prompt"] = settings.get("script_prompt", profile.script_prompt)
+    if source in IMAGE_SOURCES and profile.scene_prompt:
+        # A still needs longer on screen than a stock clip, and 10 x 4 s covers
+        # the longest (35 s) script; generation stops once narration is covered.
+        mixed = source == "mixed_image" and profile.mixed_scene_prompt
+        payload["video_terms_prompt"] = profile.mixed_scene_prompt if mixed else profile.scene_prompt
+        payload["video_terms_amount"] = profile.image_count
+        payload["video_clip_duration"] = profile.image_clip_duration
+    elif profile.terms_prompt:
+        payload["video_terms_prompt"] = profile.terms_prompt
+    return payload
+
+
+def next_posting_slots(
+    now: datetime,
+    slots: Iterable[str] = DEFAULT_POSTING_SLOTS,
+    timezone: str = "Europe/Istanbul",
+    count: int = 3,
+    min_lead: timedelta = timedelta(minutes=30),
+) -> list[datetime]:
+    """Return the next ``count`` posting times at or after ``now + min_lead``."""
+    tz = ZoneInfo(timezone)
+    local_now = now.astimezone(tz)
+    parsed = sorted(parse_slot(slot) for slot in slots)
+    if not parsed:
+        return []
+    earliest = local_now + min_lead
+    result: list[datetime] = []
+    day = local_now.date()
+    while len(result) < count:
+        for hour, minute in parsed:
+            candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
+            if candidate >= earliest:
+                result.append(candidate)
+                if len(result) == count:
+                    break
+        day += timedelta(days=1)
+    return result
+
+
+def parse_slot(slot: str) -> tuple[int, int]:
+    hour, _, minute = str(slot).partition(":")
+    h, m = int(hour), int(minute or 0)
+    if not (0 <= h < 24 and 0 <= m < 60):
+        raise ValueError(f"invalid posting slot: {slot}")
+    return h, m
+
+
+_TR_DAYS = ("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")
+
+
+def format_slot(slot: datetime) -> str:
+    return f"{_TR_DAYS[slot.weekday()]} {slot:%d.%m %H:%M}"
+
+
+def youtube_metadata(request: ShortRequest, script: str = "", profile: str | None = None) -> dict:
+    """Draft title/description/tags for a human to review before publishing."""
+    channel = get_profile(profile)
+    title = request.subject.strip()
+    if len(title) > 90:
+        title = title[:87].rstrip() + "..."
+    title = f"{title} #Shorts"
+    parts = []
+    body = (script or request.script).strip()
+    if body:
+        parts.append(body[:400])
+    if request.references:
+        parts.append("Sources:\n" + "\n".join(request.references))
+    if channel.signature:
+        parts.append(channel.signature)
+    words = re.findall(r"\w{4,}", request.subject.lower())
+    tags = list(dict.fromkeys(list(channel.hashtags) + words))[:10]
+    return {"title": title, "description": "\n\n".join(parts), "tags": tags}
+
+
+class MptApiError(RuntimeError):
+    pass
+
+
+class MptClient:
+    """Minimal client for the MoneyPrinterTurbo HTTP API."""
+
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = "",
+        timeout: float = 30,
+        session: requests.Session | None = None,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.timeout = timeout
+        self.session = session or requests.Session()
+        if api_key:
+            self.session.headers["x-api-key"] = api_key
+
+    def ping(self) -> bool:
+        try:
+            return self.session.get(f"{self.base_url}/ping", timeout=self.timeout).status_code == 200
+        except requests.RequestException:
+            return False
+
+    def create_video(self, payload: dict) -> str:
+        response = self.session.post(
+            f"{self.base_url}/api/v1/videos", json=payload, timeout=self.timeout
+        )
+        data = self._json(response)
+        task_id = (data.get("data") or {}).get("task_id")
+        if not task_id:
+            raise MptApiError(f"API task_id döndürmedi: {data}")
+        return task_id
+
+    def get_task(self, task_id: str) -> dict:
+        response = self.session.get(
+            f"{self.base_url}/api/v1/tasks/{task_id}", timeout=self.timeout
+        )
+        return self._json(response).get("data") or {}
+
+    def wait_for_task(
+        self,
+        task_id: str,
+        on_progress: Callable[[dict], None] | None = None,
+        poll_interval: float = 5,
+        timeout: float = 1800,
+        sleep: Callable[[float], None] = time.sleep,
+        clock: Callable[[], float] = time.monotonic,
+        max_poll_failures: int = 6,
+    ) -> dict:
+        deadline = clock() + timeout
+        last_progress = None
+        failures = 0
+        while True:
+            # A render keeps the API busy for minutes; one slow or dropped poll
+            # must not abandon it. Only consecutive failures count.
+            try:
+                task = self.get_task(task_id)
+            except requests.RequestException:
+                failures += 1
+                if failures > max_poll_failures or clock() >= deadline:
+                    raise
+                sleep(poll_interval)
+                continue
+            failures = 0
+            state = task.get("state")
+            if state == TASK_STATE_COMPLETE:
+                return task
+            if state == TASK_STATE_FAILED:
+                stage = task.get("failed_stage") or "bilinmiyor"
+                raise MptApiError(f"Üretim başarısız ({stage}): {task.get('error') or ''}".strip())
+            progress = task.get("progress")
+            if on_progress and progress != last_progress:
+                last_progress = progress
+                on_progress(task)
+            if clock() >= deadline:
+                raise MptApiError(f"Zaman aşımı: görev {task_id} {int(timeout)} sn içinde bitmedi")
+            sleep(poll_interval)
+
+    def download(self, uri: str, destination: str, max_bytes: int = MAX_VIDEO_BYTES) -> str:
+        # The API builds artifact links from its public `endpoint` setting, which
+        # may differ from the address the bot reaches it on. Only the /tasks/
+        # path is reused, so the API key is never sent to another host.
+        path = urlparse(uri).path
+        if not path.startswith("/tasks/") or ".." in unquote(path).split("/"):
+            raise MptApiError(f"Beklenmeyen video adresi: {uri}")
+        url = f"{self.base_url}{path}"
+        written = 0
+        with self.session.get(url, stream=True, timeout=self.timeout) as response:
+            if response.status_code != 200:
+                raise MptApiError(f"Video indirilemedi: HTTP {response.status_code}")
+            with open(destination, "wb") as f:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise MptApiError("Video Slack yükleme sınırını aşıyor")
+                    f.write(chunk)
+        return destination
+
+    @staticmethod
+    def _json(response: requests.Response) -> dict:
+        try:
+            data = response.json()
+        except ValueError:
+            data = {}
+        if response.status_code != 200:
+            message = data.get("message") if isinstance(data, dict) else None
+            raise MptApiError(f"API hatası HTTP {response.status_code}: {message or response.text[:200]}")
+        return data

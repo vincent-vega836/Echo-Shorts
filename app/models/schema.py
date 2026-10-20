@@ -161,6 +161,11 @@ class VideoParams(BaseModel):
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
     custom_system_prompt: str = Field(default="", max_length=8000)
+    # Extra rules for the stock-footage search terms (e.g. "concrete scenes
+    # only, no proper nouns"); applied only when video_terms is not given.
+    video_terms_prompt: str = Field(default="", max_length=2000)
+    # How many terms to generate; empty keeps 8 (script order) or 5.
+    video_terms_amount: Optional[int] = Field(default=None, ge=1, le=20)
 
 
 class SubtitleRequest(BaseModel):
